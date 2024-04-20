@@ -12,6 +12,13 @@ const std::string pk_hex = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce7
 const std::string pk_b32z = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry";
 const std::string pk_b64 = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g=";
 
+const std::basic_string_view<std::byte> operator ""_bsv(const char* s, size_t n) {
+    return {reinterpret_cast<const std::byte*>(s), n};
+}
+const std::basic_string_view<unsigned char> operator ""_usv(const char* s, size_t n) {
+    return {reinterpret_cast<const unsigned char*>(s), n};
+}
+
 TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     REQUIRE(oxenc::to_hex("\xff\x42\x12\x34") == "ff421234"s);
     std::vector<uint8_t> chars{{1, 10, 100, 254}};
@@ -24,8 +31,11 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE(oxenc::from_hex("12345678ffEDbca9") == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
     REQUIRE("12345678ffEDbca9"_hex == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
-    REQUIRE_THROWS_AS("abc"_hex, std::invalid_argument);
-    REQUIRE_THROWS_AS("abcg"_hex, std::invalid_argument);
+    REQUIRE("12345678ffEDbca9"_hex_b == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_bsv);
+    REQUIRE("12345678ffEDbca9"_hex_u == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_usv);
+    // These should not compile:
+    //"abc"_hex;
+    //"abcg"_hex;
 
     REQUIRE(oxenc::is_hex("1234567890abcdefABCDEF1234567890abcdefABCDEF"));
     REQUIRE_FALSE(oxenc::is_hex("1234567890abcdefABCDEF1234567890aGcdefABCDEF"));
@@ -100,7 +110,13 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
             "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
     REQUIRE("YRTWK3HJIXG66YJDEIUAUK6P7HY1GTM8TGIH55ABRPNSXNPM3ZZO"_b32z ==
             "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
-    REQUIRE_THROWS_AS("abcl"_b32z, std::invalid_argument);
+    REQUIRE("pb1sa5dx"_b32z_b == "hello"_bsv);
+    REQUIRE("pb1sa5dx"_b32z_u == "hello"_usv);
+    // None of these should compile:
+    // "abcl"_b32z;  // invalid character l
+    // "abc"_b32z;  // invalid length (b32 string length % 8 cannot be 1, 3, or 6)
+    // "a"_b32z;    // likewise
+    // "abcdefghijkmno"_b32z;  // likewise (14 % 8 == 6)
 
     auto five_nulls = oxenc::from_base32z("yyyyyyyy");
     REQUIRE(five_nulls.size() == 5);
@@ -277,7 +293,13 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
 
     REQUIRE("SGVsbG8="_b64 == "Hello");
     REQUIRE("SGVsbG8"_b64 == "Hello");
-    REQUIRE_THROWS_AS("SGVsbG8$"_b64, std::invalid_argument);
+    REQUIRE("SGVsbG8"_b64_b == "Hello"_bsv);
+    REQUIRE("SGVsbG8"_b64_u == "Hello"_usv);
+    // None of these should compile:
+    // "SGVsbG8$"_b64;
+    // "ABCDE==="_b64;
+    // "ABCD===="_b64;
+    // "ABCDE"_b64;
 
     REQUIRE(oxenc::to_base64(pk) == pk_b64);
     REQUIRE(oxenc::to_base64(pk.begin(), pk.end()) == pk_b64);

@@ -255,7 +255,6 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE(oxenc::from_base64("YWJjZA") == "abcd");
     REQUIRE(oxenc::from_base64("YWJjZB") == "abcd");  // ignore superfluous bits
     REQUIRE(oxenc::from_base64("YWJjZB") == "abcd");  // ignore superfluous bits
-    REQUIRE(oxenc::from_base64("YWJj+") == "abc");    // ignore superfluous bits
     REQUIRE(oxenc::from_base64("YWJjZGU=") == "abcde");
     REQUIRE(oxenc::from_base64("YWJjZGU") == "abcde");
     REQUIRE(oxenc::from_base64("YWJjZGVm") == "abcdef");

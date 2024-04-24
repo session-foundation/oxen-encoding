@@ -39,9 +39,9 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE(oxenc::is_hex("1234567890abcdefABCDEF1234567890abcdefABCDEF"));
     REQUIRE_FALSE(oxenc::is_hex("1234567890abcdefABCDEF1234567890aGcdefABCDEF"));
-    //                                                              ^
+    //                                                            ^
     REQUIRE_FALSE(oxenc::is_hex("1234567890abcdefABCDEF1234567890agcdefABCDEF"));
-    //                                                              ^
+    //                                                            ^
     REQUIRE_FALSE(oxenc::is_hex("\x11\xff"));
     constexpr auto odd_hex = "1234567890abcdefABCDEF1234567890abcdefABCDE"sv;
     REQUIRE_FALSE(oxenc::is_hex(odd_hex));

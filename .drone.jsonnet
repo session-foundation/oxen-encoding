@@ -31,19 +31,20 @@ local debian_pipeline(name, image, arch='amd64', deps=['g++'], extra_setup=[], c
       pull: 'always',
       [if allow_fail then 'failure']: 'ignore',
       commands: [
-        'echo "Building on ${DRONE_STAGE_MACHINE}"',
-        'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
-        apt_get_quiet + 'update',
-        apt_get_quiet + 'install -y eatmydata',] + extra_setup 
-        + [
-        'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
-        'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
-        'mkdir build',
-        'cd build',
-        'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
-        'ninja -v',
-        './tests/tests --use-colour yes',
-      ] + extra_cmds,
+                  'echo "Building on ${DRONE_STAGE_MACHINE}"',
+                  'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+                  apt_get_quiet + 'update',
+                  apt_get_quiet + 'install -y eatmydata',
+                ] + extra_setup
+                + [
+                  'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
+                  'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
+                  'mkdir build',
+                  'cd build',
+                  'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
+                  'ninja -v',
+                  './tests/tests --use-colour yes',
+                ] + extra_cmds,
     },
   ],
 };

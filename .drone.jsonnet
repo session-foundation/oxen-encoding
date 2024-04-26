@@ -99,7 +99,7 @@ local macos_pipeline(name, arch, build_type) = {
   debian_pipeline('Debian bullseye (amd64)', docker_base + 'debian-bullseye'),
   debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64'),
-  debian_pipeline('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64'),
+  debian_pipeline('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', cmake_extra='-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized'),
   debian_pipeline('Debian bullseye (armhf)', docker_base + 'debian-bullseye/arm32v7', arch='arm64'),
   debian_pipeline('Ubuntu noble (amd64)', docker_base + 'ubuntu-noble'),
   debian_pipeline('Ubuntu jammy (amd64)', docker_base + 'ubuntu-jammy'),

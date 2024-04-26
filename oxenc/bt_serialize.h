@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -17,11 +18,10 @@
 #include <vector>
 
 #include "bt_value.h"
+#include "common.h"
 #include "variant.h"
 
 namespace oxenc {
-
-using namespace std::literals;
 
 /** \file
  * Oxenc serialization for internal commands is very simple: we support two primitive types,
@@ -69,17 +69,16 @@ namespace detail {
     }
 
     // Fallback base case; we only get here if none of the partial specializations below work
-    template <typename T, typename SFINAE = void>
+    template <typename T>
     struct bt_serialize {
         static_assert(
-                !std::is_same_v<T, T>, "Cannot serialize T: unsupported type for bt serialization");
+                std::is_void_v<T>, "Cannot serialize T: unsupported type for bt serialization");
     };
 
-    template <typename T, typename SFINAE = void>
+    template <typename T>
     struct bt_deserialize {
         static_assert(
-                !std::is_same_v<T, T>,
-                "Cannot deserialize T: unsupported type for bt deserialization");
+                std::is_void_v<T>, "Cannot deserialize T: unsupported type for bt deserialization");
     };
 
     /// Checks that we aren't at the end of a string view and throws if we are.
@@ -101,7 +100,8 @@ namespace detail {
 
     /// Integer specializations
     template <typename T>
-    struct bt_serialize<T, std::enable_if_t<std::is_integral_v<T>>> {
+    requires std::integral<T>
+    struct bt_serialize<T> {
         static_assert(
                 sizeof(T) <= sizeof(uint64_t),
                 "Serialization of integers larger than uint64_t is not supported");
@@ -111,20 +111,21 @@ namespace detail {
             using output_type = std::conditional_t<
                     (sizeof(T) > 1),
                     T,
-                    std::conditional_t<std::is_signed_v<T>, int, unsigned>>;
+                    std::conditional_t<std::signed_integral<T>, int, unsigned>>;
             os << 'i' << static_cast<output_type>(val) << 'e';
         }
     };
 
     template <typename T>
-    struct bt_deserialize<T, std::enable_if_t<std::is_integral_v<T>>> {
+    requires std::integral<T>
+    struct bt_deserialize<T> {
         void operator()(std::string_view& s, T& val) {
             constexpr uint64_t umax = static_cast<uint64_t>(std::numeric_limits<T>::max());
             constexpr int64_t smin = static_cast<int64_t>(std::numeric_limits<T>::min());
 
             auto [v, neg] = bt_deserialize_integer(s);
 
-            if (std::is_signed_v<T>) {
+            if (std::signed_integral<T>) {
                 if (!neg) {
                     if (v.u64 > umax)
                         throw bt_deserialize_invalid(
@@ -133,7 +134,7 @@ namespace detail {
                     val = static_cast<T>(v.u64);
                 } else {
                     auto& sval = v.i64;
-                    if (!std::is_same_v<T, int64_t> && sval < smin)
+                    if (!std::same_as<T, int64_t> && sval < smin)
                         throw bt_deserialize_invalid(
                                 "Integer deserialization failed: found too-low value " +
                                 std::to_string(sval) + " < " + std::to_string(smin));
@@ -144,7 +145,7 @@ namespace detail {
                     throw bt_deserialize_invalid(
                             "Integer deserialization failed: found negative value -" +
                             std::to_string(v.i64) + " but type is unsigned");
-                if (!std::is_same_v<T, uint64_t> && v.u64 > umax)
+                if (!std::same_as<T, uint64_t> && v.u64 > umax)
                     throw bt_deserialize_invalid(
                             "Integer deserialization failed: found too-large value " +
                             std::to_string(v.u64) + " > " + std::to_string(umax));
@@ -161,7 +162,7 @@ namespace detail {
         void operator()(std::ostream& os, const std::string_view& val) {
             os << val.size();
             os.put(':');
-            os.write(val.data(), val.size());
+            os.write(val.data(), static_cast<std::streamsize>(val.size()));
         }
     };
     template <>
@@ -202,65 +203,40 @@ namespace detail {
 
     /// Partial dict validity; we don't check the second type for serializability, that will be
     /// handled via the base case static_assert if invalid.
-    template <typename T, typename = void>
-    struct is_bt_input_dict_container_impl : std::false_type {};
     template <typename T>
-    struct is_bt_input_dict_container_impl<
-            T,
-            std::enable_if_t<
-                    std::is_same_v<
-                            std::string,
-                            std::remove_cv_t<typename T::value_type::first_type>> ||
-                            std::is_same_v<
-                                    std::string_view,
-                                    std::remove_cv_t<typename T::value_type::first_type>>,
-                    std::void_t<
-                            typename T::const_iterator /* is const iterable */,
-                            typename T::value_type::second_type /* has a second type */>>>
-            : std::true_type {};
+    concept bt_input_dict_container =
+            (std::same_as<std::string, std::remove_cv_t<typename T::value_type::first_type>> ||
+             std::same_as<
+                     std::string_view,
+                     std::remove_cv_t<typename T::value_type::first_type>>)&&requires {
+                typename T::const_iterator;           // is const iterable
+                typename T::value_type::second_type;  // has a second type
+            };
 
     /// Determines whether the type looks like something we can insert into (using
     /// `v.insert(v.end(), x)`)
-    template <typename T, typename = void>
-    struct is_bt_insertable_impl : std::false_type {};
     template <typename T>
-    struct is_bt_insertable_impl<
-            T,
-            std::void_t<decltype(std::declval<T>().insert(
-                    std::declval<T>().end(), std::declval<typename T::value_type>()))>>
-            : std::true_type {};
-    template <typename T>
-    constexpr bool is_bt_insertable = is_bt_insertable_impl<T>::value;
+    concept bt_insertable =
+            requires(T v) { v.insert(v.end(), std::declval<typename T::value_type>()); };
 
     /// Determines whether the given type looks like a compatible map (i.e. has std::string keys)
     /// that we can insert into.
-    template <typename T, typename = void>
-    struct is_bt_output_dict_container_impl : std::false_type {};
     template <typename T>
-    struct is_bt_output_dict_container_impl<
-            T,
-            std::enable_if_t<
-                    std::is_same_v<
-                            std::string,
-                            std::remove_cv_t<typename T::value_type::first_type>> &&
-                            is_bt_insertable<T>,
-                    std::void_t<typename T::value_type::second_type /* has a second type */>>>
-            : std::true_type {};
-
-    template <typename T>
-    constexpr bool is_bt_output_dict_container = is_bt_output_dict_container_impl<T>::value;
-    template <typename T>
-    constexpr bool is_bt_input_dict_container = is_bt_output_dict_container_impl<T>::value;
+    concept bt_output_dict_container =
+            std::same_as<std::string, std::remove_cv_t<typename T::value_type::first_type>> &&
+            requires {
+                typename T::value_type::second_type;  // has a second type
+            };
 
     // Sanity checks:
-    static_assert(is_bt_input_dict_container<bt_dict>);
-    static_assert(is_bt_output_dict_container<bt_dict>);
+    static_assert(bt_input_dict_container<bt_dict>);
+    static_assert(bt_output_dict_container<bt_dict>);
 
     /// Specialization for a dict-like container (such as an unordered_map).  We accept anything for
     /// a dict that is const iterable over something that looks like a pair with std::string for
     /// first value type.  The value (i.e. second element of the pair) also must be serializable.
-    template <typename T>
-    struct bt_serialize<T, std::enable_if_t<is_bt_input_dict_container<T>>> {
+    template <bt_input_dict_container T>
+    struct bt_serialize<T> {
         using second_type = typename T::value_type::second_type;
         using ref_pair = std::reference_wrapper<const typename T::value_type>;
         void operator()(std::ostream& os, const T& dict) {
@@ -280,8 +256,8 @@ namespace detail {
         }
     };
 
-    template <typename T>
-    struct bt_deserialize<T, std::enable_if_t<is_bt_output_dict_container<T>>> {
+    template <bt_output_dict_container T>
+    struct bt_deserialize<T> {
         using second_type = typename T::value_type::second_type;
         void operator()(std::string_view& s, T& dict) {
             // Smallest dict is 2 bytes "de", for an empty dict.
@@ -313,38 +289,25 @@ namespace detail {
 
     /// Accept anything that looks iterable; value serialization validity isn't checked here (it
     /// fails via the base case static assert).
-    template <typename T, typename = void>
-    struct is_bt_input_list_container_impl : std::false_type {};
     template <typename T>
-    struct is_bt_input_list_container_impl<
-            T,
-            std::enable_if_t<
-                    !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> &&
-                            !is_bt_input_dict_container<T>,
-                    std::void_t<typename T::const_iterator, typename T::value_type>>>
-            : std::true_type {};
-
-    template <typename T, typename = void>
-    struct is_bt_output_list_container_impl : std::false_type {};
-    template <typename T>
-    struct is_bt_output_list_container_impl<
-            T,
-            std::enable_if_t<
-                    !std::is_same_v<T, std::string> && !is_bt_output_dict_container<T> &&
-                    is_bt_insertable<T>>> : std::true_type {};
+    concept bt_input_list_container =
+            !std::same_as<T, std::string> && !std::same_as<T, std::string_view> &&
+            !bt_input_dict_container<T> && requires {
+                typename T::const_iterator;
+                typename T::value_type;
+            };
 
     template <typename T>
-    constexpr bool is_bt_output_list_container = is_bt_output_list_container_impl<T>::value;
-    template <typename T>
-    constexpr bool is_bt_input_list_container = is_bt_input_list_container_impl<T>::value;
+    concept bt_output_list_container =
+            !std::same_as<T, std::string> && !bt_output_dict_container<T> && bt_insertable<T>;
 
     // Sanity checks:
-    static_assert(is_bt_input_list_container<bt_list>);
-    static_assert(is_bt_output_list_container<bt_list>);
+    static_assert(bt_input_list_container<bt_list>);
+    static_assert(bt_output_list_container<bt_list>);
 
     /// List specialization
-    template <typename T>
-    struct bt_serialize<T, std::enable_if_t<is_bt_input_list_container<T>>> {
+    template <bt_input_list_container T>
+    struct bt_serialize<T> {
         void operator()(std::ostream& os, const T& list) {
             os << 'l';
             for (const auto& v : list)
@@ -352,8 +315,8 @@ namespace detail {
             os << 'e';
         }
     };
-    template <typename T>
-    struct bt_deserialize<T, std::enable_if_t<is_bt_output_list_container<T>>> {
+    template <bt_output_list_container T>
+    struct bt_deserialize<T> {
         using value_type = typename T::value_type;
         void operator()(std::string_view& s, T& list) {
             // Smallest list is 2 bytes "le", for an empty list.
@@ -443,13 +406,13 @@ namespace detail {
     inline constexpr bool is_bt_tuple<std::pair<S, T>> = true;
 
     template <typename T>
-    constexpr bool is_bt_deserializable =
-            std::is_same_v<T, std::string> || std::is_integral_v<T> ||
-            is_bt_output_dict_container<T> || is_bt_output_list_container<T> || is_bt_tuple<T>;
+    concept bt_deserializable =
+            std::same_as<T, std::string> || std::integral<T> || bt_output_dict_container<T> ||
+            bt_output_list_container<T> || is_bt_tuple<T>;
 
     // General template and base case; this base will only actually be invoked when Ts... is empty,
     // which means we reached the end without finding any variant type capable of holding the value.
-    template <typename SFINAE, typename Variant, typename... Ts>
+    template <typename Variant, typename... Ts>
     struct bt_deserialize_try_variant_impl {
         void operator()(std::string_view&, Variant&) {
             throw bt_deserialize_invalid(
@@ -459,22 +422,18 @@ namespace detail {
 
     template <typename... Ts, typename Variant>
     void bt_deserialize_try_variant(std::string_view& s, Variant& variant) {
-        bt_deserialize_try_variant_impl<void, Variant, Ts...>{}(s, variant);
+        bt_deserialize_try_variant_impl<Variant, Ts...>{}(s, variant);
     }
 
-    template <typename Variant, typename T, typename... Ts>
-    struct bt_deserialize_try_variant_impl<
-            std::enable_if_t<is_bt_deserializable<T>>,
-            Variant,
-            T,
-            Ts...> {
+    template <typename Variant, bt_deserializable T, typename... Ts>
+    struct bt_deserialize_try_variant_impl<Variant, T, Ts...> {
         void operator()(std::string_view& s, Variant& variant) {
-            if (is_bt_output_list_container<T>   ? s[0] == 'l'
-                : is_bt_tuple<T>                 ? s[0] == 'l'
-                : is_bt_output_dict_container<T> ? s[0] == 'd'
-                : std::is_integral_v<T>          ? s[0] == 'i'
-                : std::is_same_v<T, std::string> ? s[0] >= '0' && s[0] <= '9'
-                                                 : false) {
+            if (bt_output_list_container<T>    ? s[0] == 'l'
+                : is_bt_tuple<T>               ? s[0] == 'l'
+                : bt_output_dict_container<T>  ? s[0] == 'd'
+                : std::integral<T>             ? s[0] == 'i'
+                : std::same_as<T, std::string> ? s[0] >= '0' && s[0] <= '9'
+                                               : false) {
                 T val;
                 bt_deserialize<T>{}(s, val);
                 variant = std::move(val);
@@ -485,11 +444,8 @@ namespace detail {
     };
 
     template <typename Variant, typename T, typename... Ts>
-    struct bt_deserialize_try_variant_impl<
-            std::enable_if_t<!is_bt_deserializable<T>>,
-            Variant,
-            T,
-            Ts...> {
+    requires(!bt_deserializable<T>)
+    struct bt_deserialize_try_variant_impl<Variant, T, Ts...> {
         void operator()(std::string_view& s, Variant& variant) {
             // Unsupported deserialization type, skip it
             bt_deserialize_try_variant<Ts...>(s, variant);
@@ -498,11 +454,15 @@ namespace detail {
 
     // Serialization of a variant; all variant types must be bt-serializable.
     template <typename... Ts>
-    struct bt_serialize<std::variant<Ts...>, std::void_t<bt_serialize<Ts>...>> {
+    struct bt_serialize<std::variant<Ts...>> {
+        static_assert(
+                (std::invocable<bt_serialize<Ts>, std::ostream&, const Ts&> && ...),
+                "all variant types must be bt-serializable");
+
         void operator()(std::ostream& os, const std::variant<Ts...>& val) {
             var::visit(
                     [&os](const auto& val) {
-                        using T = std::remove_cv_t<std::remove_reference_t<decltype(val)>>;
+                        using T = std::remove_cvref_t<decltype(val)>;
                         bt_serialize<T>{}(os, val);
                     },
                     val);
@@ -511,9 +471,10 @@ namespace detail {
 
     // Deserialization to a variant; at least one variant type must be bt-deserializble.
     template <typename... Ts>
-    struct bt_deserialize<
-            std::variant<Ts...>,
-            std::enable_if_t<(is_bt_deserializable<Ts> || ...)>> {
+    struct bt_deserialize<std::variant<Ts...>> {
+        static_assert(
+                (bt_deserializable<Ts> || ...), "at least one type must be bt-deserializable");
+
         void operator()(std::string_view& s, std::variant<Ts...>& val) {
             bt_deserialize_try_variant<Ts...>(s, val);
         }
@@ -601,12 +562,14 @@ std::string bt_serialize(const T& val) {
 /// Note that this method can set a value even if in fails, in particular when the value was parsed
 /// successfully but the parsed string still has remaining content.
 ///
-template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+template <typename T>
+requires(!std::is_const_v<T>)
 void bt_deserialize(std::string_view s, T& val) {
     detail::bt_deserialize<T>{}(s, val);
     if (!s.empty())
         throw bt_deserialize_invalid{
-                "Deserialization failed: did not consume the entire encoded string" + std::to_string(s.size())};
+                "Deserialization failed: did not consume the entire encoded string" +
+                std::to_string(s.size())};
 }
 
 /// Deserializes the given string_view into a `T`, which is returned.
@@ -644,10 +607,10 @@ inline bt_value bt_get(std::string_view s) {
 ///     std::string encoded = "i123456789e";
 ///     auto val = bt_get(encoded);
 ///     auto v = get_int<uint32_t>(val); // throws if the decoded value doesn't fit in a uint32_t
-template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
+template <std::integral IntType>
 IntType get_int(const bt_value& v) {
     if (auto* value = std::get_if<uint64_t>(&v)) {
-        if constexpr (!std::is_same_v<IntType, uint64_t>)
+        if constexpr (!std::same_as<IntType, uint64_t>)
             if (*value > static_cast<uint64_t>(std::numeric_limits<IntType>::max()))
                 throw std::overflow_error(
                         "Unable to extract integer value: stored value is too large for the "
@@ -656,7 +619,7 @@ IntType get_int(const bt_value& v) {
     }
 
     int64_t value = var::get<int64_t>(v);  // throws if no int contained
-    if constexpr (!std::is_same_v<IntType, int64_t>)
+    if constexpr (!std::same_as<IntType, int64_t>)
         if (value > static_cast<int64_t>(std::numeric_limits<IntType>::max()) ||
             value < static_cast<int64_t>(std::numeric_limits<IntType>::min()))
             throw std::overflow_error(
@@ -692,15 +655,14 @@ namespace detail {
     template <typename T, typename It>
     void get_tuple_impl_one(T& t, It& it) {
         const bt_variant& v = *it++;
-        if constexpr (std::is_integral_v<T>) {
+        if constexpr (std::integral<T>) {
             t = oxenc::get_int<T>(v);
         } else if constexpr (is_bt_tuple<T>) {
             if (std::holds_alternative<bt_list>(v))
                 throw std::invalid_argument{
                         "Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
             t = get_tuple<T>(var::get<bt_list>(v));
-        } else if constexpr (
-                std::is_same_v<std::string, T> || std::is_same_v<std::string_view, T>) {
+        } else if constexpr (std::same_as<std::string, T> || std::same_as<std::string_view, T>) {
             // If we request a string/string_view, we might have the other one and need to copy/view
             // it.
             if (std::holds_alternative<std::string_view>(v))
@@ -721,18 +683,18 @@ namespace detail {
 
     template <typename T, typename Consumer>
     T consume_impl(Consumer& c) {
-        if constexpr (std::is_integral_v<T>)
+        if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
         else if constexpr (detail::is_string_like<T>)
             return T{c.template consume_string_view<typename T::value_type>()};
-        else if constexpr (std::is_same_v<T, bt_dict>)
+        else if constexpr (std::same_as<T, bt_dict>)
             return c.consume_dict();
-        else if constexpr (std::is_same_v<T, bt_list>)
+        else if constexpr (std::same_as<T, bt_list>)
             return c.consume_list();
-        else if constexpr (std::is_same_v<T, bt_dict_consumer>)
+        else if constexpr (std::same_as<T, bt_dict_consumer>)
             return c.consume_dict_consumer();
         else {
-            static_assert(std::is_same_v<T, bt_list_consumer>, "Unsupported consume type");
+            static_assert(std::same_as<T, bt_list_consumer>, "Unsupported consume type");
             return c.consume_list_consumer();
         }
     }
@@ -799,11 +761,11 @@ class bt_list_consumer {
 
     /// Attempt to parse the next value as a string (and advance just past it).  Throws if the next
     /// value is not a string.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string<Char> consume_string() {
         return std::basic_string<Char>{consume_string_view<Char>()};
     }
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string_view<Char> consume_string_view() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
@@ -873,7 +835,7 @@ class bt_list_consumer {
     /// entire thing.  This is recursive into both lists and dicts and likely to be quite
     /// inefficient for large, nested structures (unless the values only need to be skipped but
     /// aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string_view<Char> consume_list_data() {
         std::basic_string_view<Char> orig{reinterpret_cast<const Char*>(data.data()), data.size()};
         if (data.size() < 2 || !is_list())
@@ -895,7 +857,7 @@ class bt_list_consumer {
     /// entire thing.  This is recursive into both lists and dicts and likely to be quite
     /// inefficient for large, nested structures (unless the values only need to be skipped but
     /// aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string_view<Char> consume_dict_data() {
         std::basic_string_view<Char> orig{reinterpret_cast<const Char*>(data.data()), data.size()};
         if (data.size() < 2 || !is_dict())
@@ -936,16 +898,16 @@ class bt_list_consumer {
     template <typename VerifyFunc>
     void consume_signature(VerifyFunc verify) {
         using Char = std::conditional_t<
-                std::is_invocable_v<VerifyFunc, std::string_view&&, std::string_view&&>,
+                std::invocable<VerifyFunc, std::string_view&&, std::string_view&&>,
                 char,
                 std::conditional_t<
-                        std::is_invocable_v<
+                        std::invocable<
                                 VerifyFunc,
                                 std::basic_string_view<unsigned char>&&,
                                 std::basic_string_view<unsigned char>&&>,
                         unsigned char,
                         std::conditional_t<
-                                std::is_invocable_v<
+                                std::invocable<
                                         VerifyFunc,
                                         std::basic_string_view<std::byte>&&,
                                         std::basic_string_view<std::byte>&&>,
@@ -1079,7 +1041,7 @@ class bt_dict_consumer : private bt_list_consumer {
 
     /// Attempt to parse the next value as a string->string pair (and advance just past it).  Throws
     /// if the next value is not a string.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_string() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
@@ -1145,7 +1107,7 @@ class bt_dict_consumer : private bt_list_consumer {
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
     /// quite inefficient for large, nested structures (unless the values only need to be skipped
     /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_list_data() {
         if (data.size() < 2 || !is_list())
             throw bt_deserialize_invalid_type{"next bt dict value is not a list"};
@@ -1159,7 +1121,7 @@ class bt_dict_consumer : private bt_list_consumer {
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
     /// quite inefficient for large, nested structures (unless the values only need to be skipped
     /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_dict_data() {
         if (data.size() < 2 || !is_dict())
             throw bt_deserialize_invalid_type{"next bt dict value is not a dict"};
@@ -1262,11 +1224,11 @@ class bt_dict_consumer : private bt_list_consumer {
     ///         value = d.consume_string();
     ///
 
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     auto consume_string_view() {
         return next_string<Char>().second;
     }
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     auto consume_string() {
         return std::basic_string<Char>{consume_string_view<Char>()};
     }
@@ -1296,11 +1258,11 @@ class bt_dict_consumer : private bt_list_consumer {
         next_dict(dict);
     }
 
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string_view<Char> consume_list_data() {
         return next_list_data<Char>().second;
     }
-    template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char = char>
     std::basic_string_view<Char> consume_dict_data() {
         return next_dict_data<Char>().second;
     }
@@ -1333,16 +1295,16 @@ class bt_dict_consumer : private bt_list_consumer {
     template <typename VerifyFunc>
     void consume_signature(VerifyFunc verify) {
         using Char = std::conditional_t<
-                std::is_invocable_v<VerifyFunc, std::string_view, std::string_view>,
+                std::invocable<VerifyFunc, std::string_view, std::string_view>,
                 char,
                 std::conditional_t<
-                        std::is_invocable_v<
+                        std::invocable<
                                 VerifyFunc,
                                 std::basic_string_view<unsigned char>,
                                 std::basic_string_view<unsigned char>>,
                         unsigned char,
                         std::conditional_t<
-                                std::is_invocable_v<
+                                std::invocable<
                                         VerifyFunc,
                                         std::basic_string_view<std::byte>,
                                         std::basic_string_view<std::byte>>,
@@ -1426,7 +1388,7 @@ namespace detail {
         bool once = false;
         while (!s.empty() && (s[0] >= '0' && s[0] <= '9')) {
             once = true;
-            uint64_t bigger = uval * 10 + (s[0] - '0');
+            uint64_t bigger = uval * 10 + static_cast<uint64_t>(s[0] - '0');
             s.remove_prefix(1);
             if (bigger < uval)  // overflow
                 throw bt_deserialize_invalid(
@@ -1509,7 +1471,7 @@ namespace detail {
     template struct bt_deserialize<int64_t>;
     template struct bt_deserialize<uint64_t>;
 
-    inline void bt_deserialize<bt_value, void>::operator()(std::string_view& s, bt_value& val) {
+    inline void bt_deserialize<bt_value>::operator()(std::string_view& s, bt_value& val) {
         if (s.size() < 2)
             throw bt_deserialize_invalid(
                     "Deserialization failed: end of string found where bt-encoded value expected");

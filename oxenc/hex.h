@@ -1,5 +1,4 @@
 #pragma once
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -18,14 +17,14 @@ namespace detail {
         char from_hex_lut[256];
         char to_hex_lut[16];
         constexpr hex_table() noexcept : from_hex_lut{}, to_hex_lut{} {
-            for (unsigned char c = 0; c < 10; c++) {
-                from_hex_lut[(unsigned char)('0' + c)] = static_cast<char>(0 + c);
-                to_hex_lut[(unsigned char)(0 + c)] = static_cast<char>('0' + c);
+            for (char c = 0; c < 10; c++) {
+                from_hex_lut['0' + c] = static_cast<char>(0 + c);
+                to_hex_lut[0 + c] = static_cast<char>('0' + c);
             }
-            for (unsigned char c = 0; c < 6; c++) {
-                from_hex_lut[(unsigned char)('a' + c)] = static_cast<char>(10 + c);
-                from_hex_lut[(unsigned char)('A' + c)] = static_cast<char>(10 + c);
-                to_hex_lut[(unsigned char)(10 + c)] = static_cast<char>('a' + c);
+            for (char c = 0; c < 6; c++) {
+                from_hex_lut['a' + c] = static_cast<char>(10 + c);
+                from_hex_lut['A' + c] = static_cast<char>(10 + c);
+                to_hex_lut[10 + c] = static_cast<char>('a' + c);
             }
         }
         constexpr char from_hex(unsigned char c) const noexcept { return from_hex_lut[c]; }
@@ -108,7 +107,7 @@ std::string to_hex(It begin, It end) {
                           std::random_access_iterator_tag,
                           typename std::iterator_traits<It>::iterator_category>) {
         using std::distance;
-        hex.reserve(to_hex_size(distance(begin, end)));
+        hex.reserve(to_hex_size(static_cast<size_t>(distance(begin, end))));
     }
     to_hex(begin, end, std::back_inserter(hex));
     return hex;
@@ -250,7 +249,7 @@ std::string from_hex(It begin, It end) {
                           std::random_access_iterator_tag,
                           typename std::iterator_traits<It>::iterator_category>) {
         using std::distance;
-        bytes.reserve(from_hex_size(distance(begin, end)));
+        bytes.reserve(from_hex_size(static_cast<size_t>(distance(begin, end))));
     }
     from_hex(begin, end, std::back_inserter(bytes));
     return bytes;

@@ -1,5 +1,4 @@
 #pragma once
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <iterator>
@@ -29,9 +28,9 @@ namespace detail {
                 from_b32z_lut{}, to_b32z_lut{'y', 'b', 'n', 'd', 'r', 'f', 'g', '8', 'e', 'j', 'k',
                                              'm', 'c', 'p', 'q', 'x', 'o', 't', '1', 'u', 'w', 'i',
                                              's', 'z', 'a', '3', '4', '5', 'h', '7', '6', '9'} {
-            for (unsigned char c = 0; c < 32; c++) {
-                unsigned char x = to_b32z_lut[c];
-                from_b32z_lut[x] = c;
+            for (char c = 0; c < 32; c++) {
+                char x = to_b32z_lut[+c];
+                from_b32z_lut[+x] = c;
                 if (x >= 'a' && x <= 'z')
                     from_b32z_lut[x - 'a' + 'A'] = c;
             }
@@ -92,11 +91,11 @@ struct base32z_encoder final {
         assert(bits >= 5);
         // Discard the most significant 5 bits
         bits -= 5;
-        r &= (1 << bits) - 1;
+        r &= static_cast<decltype(r)>((1 << bits) - 1);
         // If we end up with less than 5 significant bits then try to pull another 8 bits:
         if (bits < 5 && _it != _end) {
             if (++_it != _end) {
-                r = (r << 8) | static_cast<unsigned char>(*_it);
+                (r <<= 8) |= static_cast<unsigned char>(*_it);
                 bits += 8;
             } else if (bits > 0) {
                 // No more input bytes, so shift `r` to put the bits we have into the most
@@ -116,7 +115,7 @@ struct base32z_encoder final {
 
     char operator*() {
         // Right-shift off the excess bits we aren't accessing yet
-        return detail::b32z_lut.to_b32z(r >> (bits - 5));
+        return detail::b32z_lut.to_b32z(static_cast<unsigned char>(r >> (bits - 5)));
     }
 };
 
@@ -138,7 +137,7 @@ std::string to_base32z(It begin, It end) {
                           std::random_access_iterator_tag,
                           typename std::iterator_traits<It>::iterator_category>) {
         using std::distance;
-        base32z.reserve(to_base32z_size(distance(begin, end)));
+        base32z.reserve(to_base32z_size(static_cast<size_t>(distance(begin, end))));
     }
     to_base32z(begin, end, std::back_inserter(base32z));
     return base32z;
@@ -169,7 +168,7 @@ constexpr bool is_base32z(It begin, It end) {
             typename std::iterator_traits<It>::iterator_category>;
     if constexpr (random) {
         using std::distance;
-        count = distance(begin, end) % 8;
+        count = static_cast<size_t>(distance(begin, end) % 8);
         if (count == 1 || count == 3 || count == 6)  // see below
             return false;
     }
@@ -236,7 +235,7 @@ struct base32z_decoder final {
     base32z_decoder& operator++() {
         // Discard 8 most significant bits
         bits -= 8;
-        in &= (1 << bits) - 1;
+        in &= static_cast<decltype(in)>((1 << bits) - 1);
         if (++_it != _end)
             load_byte();
         return *this;
@@ -247,11 +246,12 @@ struct base32z_decoder final {
         return copy;
     }
 
-    char operator*() { return in >> (bits - 8); }
+    char operator*() { return static_cast<char>(in >> (bits - 8)); }
 
   private:
     void load_in() {
-        in = in << 5 | detail::b32z_lut.from_b32z(static_cast<unsigned char>(*_it));
+        (in <<= 5) |= static_cast<unsigned char>(
+                detail::b32z_lut.from_b32z(static_cast<unsigned char>(*_it)));
         bits += 5;
     }
 
@@ -297,7 +297,7 @@ std::string from_base32z(It begin, It end) {
                           std::random_access_iterator_tag,
                           typename std::iterator_traits<It>::iterator_category>) {
         using std::distance;
-        bytes.reserve(from_base32z_size(distance(begin, end)));
+        bytes.reserve(from_base32z_size(static_cast<size_t>(distance(begin, end))));
     }
     from_base32z(begin, end, std::back_inserter(bytes));
     return bytes;

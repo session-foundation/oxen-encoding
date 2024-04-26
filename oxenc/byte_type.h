@@ -9,22 +9,26 @@
 namespace oxenc::detail {
 
 // Fallback - we just try a char
-template <typename OutputIt, typename = void>
+template <typename OutputIt>
 struct byte_type {
     using type = char;
 };
 
-// Support for things like std::back_inserter:
 template <typename OutputIt>
-struct byte_type<OutputIt, std::void_t<typename OutputIt::container_type>> {
+concept iterator_with_container = requires { typename OutputIt::container_type::value_type; };
+
+// Support for things like std::back_inserter:
+template <iterator_with_container OutputIt>
+struct byte_type<OutputIt> {
     using type = typename OutputIt::container_type::value_type;
 };
 
 // iterator, raw pointers:
 template <typename OutputIt>
-struct byte_type<
-        OutputIt,
-        std::enable_if_t<std::is_reference_v<typename std::iterator_traits<OutputIt>::reference>>> {
+requires(
+        !iterator_with_container<OutputIt> &&
+        std::is_reference_v<typename std::iterator_traits<OutputIt>::reference>)
+struct byte_type<OutputIt> {
     using type = std::remove_reference_t<typename std::iterator_traits<OutputIt>::reference>;
 };
 

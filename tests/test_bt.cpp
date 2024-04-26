@@ -499,7 +499,7 @@ TEST_CASE("Require integer/string methods", "[bt][dict][consumer][require]") {
 
     bt_dict_consumer btdp{data};
 
-    int a, c, i, k;
+    [[maybe_unused]] int a, c, i, k;
     std::string e, g;
     bt_dict bd;
 
@@ -629,12 +629,12 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
 
     // Test with long keys for the sig field (figuring out the exact signing value is a little
     // complicated because of the integer in the key value; this is for testing that logic).
-    for (size_t len : {9, 10, 11, 99, 100, 101, 999, 1000, 9999, 10000}) {
+    for (auto len : {9, 10, 11, 99, 100, 101, 999, 1000, 9999, 10000}) {
         SECTION("sig key length " + std::to_string(len)) {
             bt_dict_producer dp2;
             dp2.append("a", 1);
-            std::string sig_key(len, 'x');
-            dp2.append_signature(sig_key, [](std::string_view to_sign) { return "sig"; });
+            std::string sig_key(static_cast<size_t>(len), 'x');
+            dp2.append_signature(sig_key, [](std::string_view) { return "sig"; });
             bt_dict_consumer dc2{dp2.view()};
             CHECK(dc2.next_integer<int>() == std::make_pair("a"sv, 1));
             auto [key, msg, sig] = dc2.next_signature();

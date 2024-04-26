@@ -686,7 +686,7 @@ inline void bt_list_producer::buffer_append(std::string_view d) {
     } else {
         auto* bs = std::get_if<buf_span>(&out);
         assert(bs);
-        size_t avail = std::distance(bs->init + next, bs->end);
+        auto avail = static_cast<size_t>(std::distance(bs->init + next, bs->end));
         if (d.size() > avail)
             throw std::length_error{"Cannot write bt_producer: buffer size exceeded"};
         std::copy(d.begin(), d.end(), bs->init + next);

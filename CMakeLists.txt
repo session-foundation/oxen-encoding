@@ -38,6 +38,8 @@ endif()
 option(OXENC_BUILD_TESTS "Building and perform oxenc tests" ${oxenc_IS_TOPLEVEL_PROJECT})
 option(OXENC_BUILD_DOCS "Build oxenc documentation" ${oxenc_IS_TOPLEVEL_PROJECT})
 option(OXENC_INSTALL "Add oxenc headers to install target" ${oxenc_IS_TOPLEVEL_PROJECT})
+option(OXENC_WARNINGS_AS_ERRORS "Turn on -Werror" ${oxenc_IS_TOPLEVEL_PROJECT})
+option(OXENC_EXTRA_WARNINGS "Turn on various extra warnings" ${oxenc_IS_TOPLEVEL_PROJECT})
 
 
 configure_file(oxenc/version.h.in oxenc/version.h @ONLY)
@@ -52,6 +54,13 @@ target_include_directories(oxenc
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 add_library(oxenc::oxenc ALIAS oxenc)
+
+if(OXENC_EXTRA_WARNINGS)
+    target_compile_options(oxenc INTERFACE -Wall -Wextra -Wconversion -Wpedantic -Wcast-align -Wunused)
+endif()
+if(OXENC_WARNINGS_AS_ERRORS)
+    target_compile_options(oxenc INTERFACE -Werror)
+endif()
 
 export(
     TARGETS oxenc

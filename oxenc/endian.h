@@ -61,11 +61,11 @@ constexpr bool is_endian_swappable = std::is_integral_v<T> && (sizeof(T) == 1 ||
 template <typename T, typename = std::enable_if_t<is_endian_swappable<T>>>
 void byteswap_inplace(T& val) {
     if constexpr (sizeof(T) == 2)
-        val = bswap_16(val);
+        val = static_cast<T>(bswap_16(static_cast<uint16_t>(val)));
     else if constexpr (sizeof(T) == 4)
-        val = bswap_32(val);
+        val = static_cast<T>(bswap_32(static_cast<uint32_t>(val)));
     else if constexpr (sizeof(T) == 8)
-        val = bswap_64(val);
+        val = static_cast<T>(bswap_64(static_cast<uint64_t>(val)));
 }
 
 /// Converts a host-order integer value into a little-endian value, mutating it.  Does nothing

@@ -30,7 +30,7 @@ struct rlp_value : rlp_variant {
             typename T,
             typename U = std::remove_reference_t<T>,
             std::enable_if_t<std::is_integral_v<U> && std::is_unsigned_v<U>, int> = 0>
-    rlp_value(T&& uint) : rlp_variant{static_cast<uint64_t>(uint)} {}
+    rlp_value(T&& val) : rlp_variant{static_cast<uint64_t>(val)} {}
 
     template <
             typename T,
@@ -163,12 +163,12 @@ namespace detail {
         std::string result;
         if (payload.size() <= 55) {
             result.reserve(1 + payload.size());
-            result.push_back(base_code + payload.size());
+            result.push_back(static_cast<char>(base_code + payload.size()));
         } else {
 
             auto [buf, length] = rlp_encode_integer(payload.size());
             result.reserve(1 + length.size() + payload.size());
-            result.push_back(base_code + 55 + length.size());
+            result.push_back(static_cast<char>(base_code + 55 + length.size()));
             result += length;
         }
         result += payload;

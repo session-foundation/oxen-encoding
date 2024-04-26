@@ -65,13 +65,13 @@ struct bt_value : bt_variant {
             typename T,
             typename U = std::remove_reference_t<T>,
             std::enable_if_t<std::is_integral_v<U> && std::is_unsigned_v<U>, int> = 0>
-    bt_value(T&& uint) : bt_variant{static_cast<uint64_t>(uint)} {}
+    bt_value(T&& u_val) : bt_variant{static_cast<uint64_t>(u_val)} {}
 
     template <
             typename T,
             typename U = std::remove_reference_t<T>,
             std::enable_if_t<std::is_integral_v<U> && std::is_signed_v<U>, int> = 0>
-    bt_value(T&& sint) : bt_variant{static_cast<int64_t>(sint)} {}
+    bt_value(T&& s_val) : bt_variant{static_cast<int64_t>(s_val)} {}
 
     template <typename... T>
     bt_value(const std::tuple<T...>& tuple) :

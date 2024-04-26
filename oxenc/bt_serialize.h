@@ -161,7 +161,7 @@ namespace detail {
         void operator()(std::ostream& os, const std::string_view& val) {
             os << val.size();
             os.put(':');
-            os.write(val.data(), val.size());
+            os.write(val.data(), static_cast<std::streamsize>(val.size()));
         }
     };
     template <>
@@ -1426,7 +1426,7 @@ namespace detail {
         bool once = false;
         while (!s.empty() && (s[0] >= '0' && s[0] <= '9')) {
             once = true;
-            uint64_t bigger = uval * 10 + (s[0] - '0');
+            uint64_t bigger = uval * 10 + static_cast<uint64_t>(s[0] - '0');
             s.remove_prefix(1);
             if (bigger < uval)  // overflow
                 throw bt_deserialize_invalid(

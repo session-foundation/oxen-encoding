@@ -3,11 +3,13 @@
 // This header is here to provide just the basic bt_value/bt_dict/bt_list definitions without
 // needing to include the full bt_serialize.h header.
 
+#include <concepts>
 #include <cstdint>
 #include <list>
 #include <map>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 
 namespace oxenc {
@@ -22,21 +24,6 @@ using bt_list = std::list<bt_value>;
 
 /// The basic variant that can hold anything (recursively).
 using bt_variant = std::variant<std::string, std::string_view, int64_t, uint64_t, bt_list, bt_dict>;
-
-#ifdef __cpp_lib_remove_cvref  // C++20
-using std::remove_cvref_t;
-#else
-template <typename T>
-using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
-#endif
-
-template <typename T, typename Variant>
-struct has_alternative;
-template <typename T, typename... V>
-struct has_alternative<T, std::variant<V...>> : std::bool_constant<(std::is_same_v<T, V> || ...)> {
-};
-template <typename T, typename Variant>
-constexpr bool has_alternative_v = has_alternative<T, Variant>::value;
 
 namespace detail {
     template <typename Tuple, size_t... Is>
@@ -61,16 +48,12 @@ struct bt_value : bt_variant {
     using bt_variant::bt_variant;
     using bt_variant::operator=;
 
-    template <
-            typename T,
-            typename U = std::remove_reference_t<T>,
-            std::enable_if_t<std::is_integral_v<U> && std::is_unsigned_v<U>, int> = 0>
+    template <typename T>
+    requires std::unsigned_integral<std::remove_cvref_t<T>>
     bt_value(T&& u_val) : bt_variant{static_cast<uint64_t>(u_val)} {}
 
-    template <
-            typename T,
-            typename U = std::remove_reference_t<T>,
-            std::enable_if_t<std::is_integral_v<U> && std::is_signed_v<U>, int> = 0>
+    template <typename T>
+    requires std::signed_integral<std::remove_cvref_t<T>>
     bt_value(T&& s_val) : bt_variant{static_cast<int64_t>(s_val)} {}
 
     template <typename... T>
@@ -81,10 +64,8 @@ struct bt_value : bt_variant {
     bt_value(const std::pair<S, T>& pair) :
             bt_variant{detail::tuple_to_list(pair, std::index_sequence_for<S, T>{})} {}
 
-    template <
-            typename T,
-            typename U = std::remove_reference_t<T>,
-            std::enable_if_t<!std::is_integral_v<U> && !detail::is_tuple<U>, int> = 0>
+    template <typename T>
+    requires(!std::integral<std::remove_cvref_t<T>> && !detail::is_tuple<std::remove_cvref_t<T>>)
     bt_value(T&& v) : bt_variant{std::forward<T>(v)} {}
 
     bt_value(const char* s) : bt_value{std::string_view{s}} {}

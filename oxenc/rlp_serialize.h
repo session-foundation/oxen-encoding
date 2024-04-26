@@ -1,5 +1,5 @@
 #include <array>
-#include <cstddef>
+#include <concepts>
 #include <list>
 #include <span>
 #include <string>
@@ -7,6 +7,7 @@
 #include <utility>
 #include <variant>
 
+#include "common.h"
 #include "endian.h"
 
 namespace oxenc {
@@ -26,50 +27,36 @@ struct rlp_value : rlp_variant {
     using rlp_variant::rlp_variant;
     using rlp_variant::operator=;
 
-    template <
-            typename T,
-            typename U = std::remove_reference_t<T>,
-            std::enable_if_t<std::is_integral_v<U> && std::is_unsigned_v<U>, int> = 0>
+    template <typename T>
+    requires std::unsigned_integral<std::remove_cvref_t<T>>
     rlp_value(T&& val) : rlp_variant{static_cast<uint64_t>(val)} {}
 
-    template <
-            typename T,
-            typename U = std::remove_reference_t<T>,
-            std::enable_if_t<!std::is_integral_v<U>, int> = 0>
+    template <typename T>
+    requires(!std::integral<std::remove_cvref_t<T>>)
     rlp_value(T&& v) : rlp_variant{std::forward<T>(v)} {}
 
     rlp_value(const char* s) : rlp_value{std::string_view{s}} {}
 };
 
 namespace detail {
-    template <typename T, typename = void>
+    template <typename T>
     constexpr bool is_rlp_serializable = false;
 
     template <typename T>
-    constexpr bool
-            is_rlp_serializable<T, std::enable_if_t<std::is_unsigned_v<std::remove_cvref_t<T>>>> =
-                    true;
+    requires std::unsigned_integral<std::remove_cvref_t<T>>
+    constexpr bool is_rlp_serializable<T> = true;
 
     template <typename T>
     constexpr bool is_span = false;
     template <typename T>
     constexpr bool is_span<std::span<T>> = true;
     template <typename T>
-    constexpr bool is_basic_char =
-            sizeof(T) == 1 && (std::is_integral_v<T> || std::is_same_v<T, std::byte>);
-    template <typename T>
     constexpr bool is_char_span = false;
     template <typename T>
-    constexpr bool is_char_span<std::span<T>> = is_basic_char<std::remove_cv_t<T>>;
-    template <typename T, typename = void>
-    constexpr bool is_span_convertible = false;
+    constexpr bool is_char_span<std::span<T>> = basic_char<std::remove_cv_t<T>>;
     template <typename T>
-    constexpr bool is_span_convertible<
-            T,
-            std::enable_if_t<
-                    !is_span<T> &&
-                    std::is_convertible_v<const T&, std::span<const typename T::value_type>>>> =
-            true;
+    concept span_convertible =
+            !is_span<T> && std::convertible_to<const T&, std::span<const typename T::value_type>>;
 
     template <typename T>
     constexpr bool is_list = false;
@@ -77,12 +64,13 @@ namespace detail {
     constexpr bool is_list<std::list<T>> = true;
 
     template <typename T>
-    constexpr bool is_rlp_serializable<T, std::enable_if_t<is_span_convertible<T>>> =
+    requires span_convertible<T>
+    constexpr bool is_rlp_serializable<T> =
             is_rlp_serializable<std::span<const typename T::value_type>>;
 
     template <typename T>
     constexpr bool is_rlp_serializable<std::span<T>> =
-            is_char_span<std::span<T>> || is_rlp_serializable<std::remove_cvref_t<T>>;
+            basic_char<T> || is_rlp_serializable<std::remove_cvref_t<T>>;
 
     template <typename T>
     constexpr bool is_rlp_serializable<std::list<T>> = is_rlp_serializable<std::remove_cvref_t<T>>;
@@ -127,7 +115,7 @@ template <RLPSerializable T>
 inline std::string rlp_serialize(const T& val) {
     using namespace detail;
 
-    if constexpr (std::is_unsigned_v<T>) {
+    if constexpr (std::unsigned_integral<T>) {
         auto [buf, v] = rlp_encode_integer(val);
         return rlp_serialize(v);
     } else if constexpr (is_char_span<T>) {
@@ -140,12 +128,12 @@ inline std::string rlp_serialize(const T& val) {
         for (const auto& x : val)
             payload += rlp_serialize(x);
         return detail::rlp_encode_payload(payload, 0xc0u);
-    } else if constexpr (is_span_convertible<T>) {
+    } else if constexpr (span_convertible<T>) {
         std::span<const typename T::value_type> span = val;
         return rlp_serialize(span);
     } else if constexpr (is_variant<T>) {
         return std::visit([](const auto& x) { return rlp_serialize(x); }, val);
-    } else if constexpr (std::is_same_v<rlp_value, T>) {
+    } else if constexpr (std::same_as<rlp_value, T>) {
         // GCC 10 workaround; on gcc 11+/clang, the above case can deal with directly without first
         // needing the static to the base std::variant type (aka rlp_variant).
         return rlp_serialize(static_cast<const rlp_variant&>(val));

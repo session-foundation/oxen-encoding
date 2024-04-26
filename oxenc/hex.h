@@ -1,8 +1,8 @@
 #pragma once
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -16,7 +16,7 @@ namespace detail {
     struct hex_table {
         char from_hex_lut[256];
         char to_hex_lut[16];
-        constexpr hex_table() noexcept : from_hex_lut{}, to_hex_lut{} {
+        consteval hex_table() noexcept : from_hex_lut{}, to_hex_lut{} {
             for (char c = 0; c < 10; c++) {
                 from_hex_lut['0' + c] = static_cast<char>(0 + c);
                 to_hex_lut[0 + c] = static_cast<char>('0' + c);
@@ -44,9 +44,10 @@ namespace detail {
 inline constexpr size_t to_hex_size(size_t byte_size) {
     return byte_size * 2;
 }
-/// Returns the number of bytes required to decode a hex string of the given size.
+/// Returns the number of bytes required to decode a hex string of the given size.  Returns 0 if the
+/// input is not a valid hex string size (i.e. for odd sizes).
 inline constexpr size_t from_hex_size(size_t hex_size) {
-    return hex_size / 2;
+    return hex_size % 2 ? 0 : hex_size / 2;
 }
 
 /// Iterable object for on-the-fly hex encoding.  Used internally, but also particularly useful when
@@ -65,25 +66,28 @@ struct hex_encoder final {
     using value_type = char;
     using reference = value_type;
     using pointer = void;
-    hex_encoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {}
+    constexpr hex_encoder(InputIt begin, InputIt end) :
+            _it{std::move(begin)}, _end{std::move(end)} {}
 
-    hex_encoder end() { return {_end, _end}; }
+    constexpr hex_encoder end() { return {_end, _end}; }
 
-    bool operator==(const hex_encoder& i) { return _it == i._it && second_half == i.second_half; }
-    bool operator!=(const hex_encoder& i) { return !(*this == i); }
+    constexpr bool operator==(const hex_encoder& i) const {
+        return _it == i._it && second_half == i.second_half;
+    }
+    constexpr bool operator!=(const hex_encoder& i) const { return !(*this == i); }
 
-    hex_encoder& operator++() {
+    constexpr hex_encoder& operator++() {
         second_half = !second_half;
         if (!second_half)
             ++_it;
         return *this;
     }
-    hex_encoder operator++(int) {
+    constexpr hex_encoder operator++(int) {
         hex_encoder copy{*this};
         ++*this;
         return copy;
     }
-    char operator*() {
+    constexpr char operator*() {
         return detail::hex_lut.to_hex(
                 second_half ? c & 0x0f : (c = static_cast<uint8_t>(*_it)) >> 4);
     }
@@ -93,7 +97,7 @@ struct hex_encoder final {
 /// Returns the final value of out (i.e. the iterator positioned just after the last written
 /// hex character).
 template <typename InputIt, typename OutputIt>
-OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
+constexpr OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_hex requires chars/bytes");
     auto it = hex_encoder{begin, end};
     return std::copy(it, it.end(), out);
@@ -195,30 +199,31 @@ struct hex_decoder final {
     using value_type = char;
     using reference = value_type;
     using pointer = void;
-    hex_decoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {
+    constexpr hex_decoder(InputIt begin, InputIt end) :
+            _it{std::move(begin)}, _end{std::move(end)} {
         if (_it != _end)
             load_byte();
     }
 
-    hex_decoder end() { return {_end, _end}; }
+    constexpr hex_decoder end() { return {_end, _end}; }
 
-    bool operator==(const hex_decoder& i) { return _it == i._it; }
-    bool operator!=(const hex_decoder& i) { return _it != i._it; }
+    constexpr bool operator==(const hex_decoder& i) const { return _it == i._it; }
+    constexpr bool operator!=(const hex_decoder& i) const { return _it != i._it; }
 
-    hex_decoder& operator++() {
+    constexpr hex_decoder& operator++() {
         if (++_it != _end)
             load_byte();
         return *this;
     }
-    hex_decoder operator++(int) {
+    constexpr hex_decoder operator++(int) {
         hex_decoder copy{*this};
         ++*this;
         return copy;
     }
-    char operator*() const { return byte; }
+    constexpr char operator*() const { return byte; }
 
   private:
-    void load_byte() {
+    constexpr void load_byte() {
         auto a = *_it;
         auto b = *++_it;
         byte = from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b));
@@ -231,7 +236,8 @@ struct hex_decoder final {
 /// than begin.  Returns the final value of out (that is, the iterator positioned just after the
 /// last written character).
 template <typename InputIt, typename OutputIt>
-OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
+constexpr OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
+    static_assert(sizeof(decltype(*begin)) == 1, "from_base32z requires chars/bytes");
     assert(is_hex(begin, end));
     auto it = hex_decoder(begin, end);
     const auto hend = it.end();
@@ -269,12 +275,42 @@ std::string from_hex(const std::basic_string<CharT>& s) {
     return from_hex(s.begin(), s.end());
 }
 
+namespace detail {
+    template <size_t N>
+    struct hex_literal {
+        consteval hex_literal(const char (&h)[N]) {
+            valid = is_hex(h, h + N - 1);
+            auto end = valid ? from_hex(h, h + N - 1, decoded) : decoded;
+            while (end < std::end(decoded))
+                *end++ = 0;
+        }
+
+        char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
+        bool valid;
+        template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+        constexpr std::basic_string_view<Char> view() const {
+            return {reinterpret_cast<const Char*>(decoded), valid ? sizeof(decoded) - 1 : 0};
+        }
+    };
+}  // namespace detail
+
 inline namespace literals {
-    inline std::string operator""_hex(const char* x, size_t n) {
-        std::string_view in{x, n};
-        if (!is_hex(in))
-            throw std::invalid_argument{"hex literal is not hex"};
-        return from_hex(in);
+    template <detail::hex_literal Hex>
+    constexpr std::string_view operator""_hex() {
+        static_assert(Hex.valid, "invalid hex literal");
+        return Hex.view();
+    }
+
+    template <detail::hex_literal Hex>
+    constexpr std::basic_string_view<std::byte> operator""_hex_b() {
+        static_assert(Hex.valid, "invalid hex literal");
+        return Hex.template view<std::byte>();
+    }
+
+    template <detail::hex_literal Hex>
+    constexpr std::basic_string_view<unsigned char> operator""_hex_u() {
+        static_assert(Hex.valid, "invalid hex literal");
+        return Hex.template view<unsigned char>();
     }
 }  // namespace literals
 

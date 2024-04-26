@@ -1,8 +1,8 @@
 #pragma once
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -23,7 +23,7 @@ namespace detail {
 
         // constexpr constructor that fills out the above (and should do it at compile time for any
         // half decent compiler).
-        constexpr b64_table() noexcept : from_b64_lut{}, to_b64_lut{} {
+        consteval b64_table() noexcept : from_b64_lut{}, to_b64_lut{} {
             for (char c = 0; c < 26; c++) {
                 from_b64_lut['A' + c] = static_cast<char>(0 + c);
                 to_b64_lut[0 + c] = static_cast<char>('A' + c);
@@ -63,10 +63,14 @@ inline constexpr size_t to_base64_size(size_t byte_size, bool padded = true) {
                   : (byte_size * 4 + 2) / 3;  // ⌈bytes*4/3⌉
 }
 /// Returns the (maximum) number of bytes required to decode a base64 string of the given size.
-/// Note that this may overallocate by 1-2 bytes if the size includes 1-2 padding chars.
+/// Note that this may overallocate by 1-2 bytes if the size includes 1-2 padding chars.  Returns 0
+/// if the given size is not a valid base64 padded or unpadded size.
 inline constexpr size_t from_base64_size(size_t b64_size) {
-    return b64_size * 3 /
-           4;  // == ⌊bits/8⌋; floor because we ignore trailing "impossible" bits (see below)
+    size_t s = b64_size * 3;
+    return s % 4 < 3 ? s / 4 : 0;
+    // unpadded base64 use 4n+{0,2,3} characters
+    // padded base64 always pad out to 4n characters
+    // s % 4 == 3 would mean we have an invalid 4n+1 size.
 }
 
 /// Iterable object for on-the-fly base64 encoding.  Used internally, but also particularly useful
@@ -90,17 +94,17 @@ struct base64_encoder final {
     using value_type = char;
     using reference = value_type;
     using pointer = void;
-    base64_encoder(InputIt begin, InputIt end, bool padded = true) :
+    constexpr base64_encoder(InputIt begin, InputIt end, bool padded = true) :
             _it{std::move(begin)}, _end{std::move(end)}, padding{padded} {}
 
-    base64_encoder end() { return {_end, _end, false}; }
+    constexpr base64_encoder end() { return {_end, _end, false}; }
 
-    bool operator==(const base64_encoder& i) {
+    constexpr bool operator==(const base64_encoder& i) const {
         return _it == i._it && bits == i.bits && padding == i.padding;
     }
-    bool operator!=(const base64_encoder& i) { return !(*this == i); }
+    constexpr bool operator!=(const base64_encoder& i) const { return !(*this == i); }
 
-    base64_encoder& operator++() {
+    constexpr base64_encoder& operator++() {
         if (bits == 0) {
             padding--;
             return *this;
@@ -134,13 +138,13 @@ struct base64_encoder final {
         }
         return *this;
     }
-    base64_encoder operator++(int) {
+    constexpr base64_encoder operator++(int) {
         base64_encoder copy{*this};
         ++*this;
         return copy;
     }
 
-    char operator*() {
+    constexpr char operator*() {
         if (bits == 0 && padding)
             return '=';
         // Right-shift off the excess bits we aren't accessing yet
@@ -228,7 +232,7 @@ constexpr bool is_base64(It begin, It end) {
     if constexpr (random) {
         count = static_cast<size_t>(distance(begin, end)) % 4;
         if (count == 1)
-            return false;
+            return false;  // 4n+1 is not valid for padded or unpadded
     }
 
     // Allow 1 or 2 padding chars *if* they pad it to a multiple of 4.
@@ -286,17 +290,18 @@ struct base64_decoder final {
     using value_type = char;
     using reference = value_type;
     using pointer = void;
-    base64_decoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {
+    constexpr base64_decoder(InputIt begin, InputIt end) :
+            _it{std::move(begin)}, _end{std::move(end)} {
         if (_it != _end)
             load_byte();
     }
 
-    base64_decoder end() { return {_end, _end}; }
+    constexpr base64_decoder end() { return {_end, _end}; }
 
-    bool operator==(const base64_decoder& i) { return _it == i._it; }
-    bool operator!=(const base64_decoder& i) { return _it != i._it; }
+    constexpr bool operator==(const base64_decoder& i) const { return _it == i._it; }
+    constexpr bool operator!=(const base64_decoder& i) const { return _it != i._it; }
 
-    base64_decoder& operator++() {
+    constexpr base64_decoder& operator++() {
         // Discard 8 most significant bits
         bits -= 8;
         in &= static_cast<decltype(in)>((1 << bits) - 1);
@@ -304,16 +309,16 @@ struct base64_decoder final {
             load_byte();
         return *this;
     }
-    base64_decoder operator++(int) {
+    constexpr base64_decoder operator++(int) {
         base64_decoder copy{*this};
         ++*this;
         return copy;
     }
 
-    char operator*() { return static_cast<char>(in >> (bits - 8)); }
+    constexpr char operator*() { return static_cast<char>(in >> (bits - 8)); }
 
   private:
-    void load_in() {
+    constexpr void load_in() {
         // We hit padding trying to read enough for a full byte, so we're done.  (And since you were
         // already supposed to have checked validity with is_base64, the padding can only be at the
         // end).
@@ -328,7 +333,7 @@ struct base64_decoder final {
         bits += 6;
     }
 
-    void load_byte() {
+    constexpr void load_byte() {
         load_in();
         if (bits && bits < 8 && ++_it != _end)
             load_in();
@@ -355,8 +360,9 @@ struct base64_decoder final {
 /// encoding of "abcd") and "YWJjZB", "YWJjZC", ..., "YWJjZP" all decode to the same "abcd" value:
 /// the last 4 bits of the last character are essentially considered padding.
 template <typename InputIt, typename OutputIt>
-OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
+constexpr OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "from_base64 requires chars/bytes");
+    assert(is_base64(begin, end));
     base64_decoder it{begin, end};
     auto bend = it.end();
     while (it != bend)
@@ -393,12 +399,43 @@ std::string from_base64(const std::basic_string<CharT>& s) {
     return from_base64(s.begin(), s.end());
 }
 
+namespace detail {
+    template <size_t N>
+    struct b64_literal {
+        consteval b64_literal(const char (&b64)[N]) {
+            bool ok = is_base64(b64, b64 + N - 1);
+            auto end = ok ? from_base64(b64, b64 + N - 1, decoded) : decoded;
+            valid = ok ? static_cast<decltype(valid)>(std::end(decoded) - end) : 0;
+            while (end < std::end(decoded))
+                *end++ = 0;
+        }
+
+        char decoded[from_base64_size(N - 1) + 1];
+        uint8_t valid;  // 0 == invalid, otherwise the number of trailing null bytes (1-3)
+        template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
+        constexpr std::basic_string_view<Char> view() const {
+            return {reinterpret_cast<const Char*>(decoded), valid ? sizeof(decoded) - valid : 0};
+        }
+    };
+}  // namespace detail
+
 inline namespace literals {
-    inline std::string operator""_b64(const char* x, size_t n) {
-        std::string_view in{x, n};
-        if (!is_base64(in))
-            throw std::invalid_argument{"base64 literal is not base64"};
-        return from_base64(in);
+    template <detail::b64_literal Base64>
+    constexpr std::string_view operator""_b64() {
+        static_assert(Base64.valid, "Invalid base64 literal");
+        return Base64.view();
+    }
+
+    template <detail::b64_literal Base64>
+    constexpr std::basic_string_view<std::byte> operator""_b64_b() {
+        static_assert(Base64.valid, "Invalid base64 literal");
+        return Base64.template view<std::byte>();
+    }
+
+    template <detail::b64_literal Base64>
+    constexpr std::basic_string_view<unsigned char> operator""_b64_u() {
+        static_assert(Base64.valid, "Invalid base64 literal");
+        return Base64.template view<unsigned char>();
     }
 }  // namespace literals
 

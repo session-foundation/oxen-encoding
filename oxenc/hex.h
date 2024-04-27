@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -276,41 +277,52 @@ std::string from_hex(const std::basic_string<CharT>& s) {
 }
 
 namespace detail {
-    template <size_t N>
+    template <basic_char Char, size_t N>
     struct hex_literal {
         consteval hex_literal(const char (&h)[N]) {
             valid = is_hex(h, h + N - 1);
             auto end = valid ? from_hex(h, h + N - 1, decoded) : decoded;
             while (end < std::end(decoded))
-                *end++ = 0;
+                *end++ = Char{0};
         }
 
-        char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
+        Char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
         bool valid;
-        template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
         constexpr std::basic_string_view<Char> view() const {
-            return {reinterpret_cast<const Char*>(decoded), valid ? sizeof(decoded) - 1 : 0};
+            return {decoded, valid ? sizeof(decoded) - 1 : 0};
         }
+    };
+    template <size_t N>
+    struct c_hex_literal : hex_literal<char, N> {
+        consteval c_hex_literal(const char (&h)[N]) : hex_literal<char, N>{h} {}
+    };
+    template <size_t N>
+    struct b_hex_literal : hex_literal<std::byte, N> {
+        consteval b_hex_literal(const char (&h)[N]) : hex_literal<std::byte, N>{h} {}
+    };
+    template <size_t N>
+    struct u_hex_literal : hex_literal<unsigned char, N> {
+        consteval u_hex_literal(const char (&h)[N]) : hex_literal<unsigned char, N>{h} {}
     };
 }  // namespace detail
 
 inline namespace literals {
-    template <detail::hex_literal Hex>
+    template <detail::c_hex_literal Hex>
     constexpr std::string_view operator""_hex() {
         static_assert(Hex.valid, "invalid hex literal");
         return Hex.view();
     }
 
-    template <detail::hex_literal Hex>
+    template <detail::b_hex_literal Hex>
     constexpr std::basic_string_view<std::byte> operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.template view<std::byte>();
+        return Hex.view();
     }
 
-    template <detail::hex_literal Hex>
+    template <detail::u_hex_literal Hex>
     constexpr std::basic_string_view<unsigned char> operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.template view<unsigned char>();
+        return Hex.view();
     }
 }  // namespace literals
 

@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -326,41 +327,52 @@ std::string from_base32z(const std::basic_string<CharT>& s) {
 }
 
 namespace detail {
-    template <size_t N>
+    template <basic_char Char, size_t N>
     struct b32z_literal {
         consteval b32z_literal(const char (&str)[N]) {
             valid = is_base32z(str, str + N - 1);
             auto end = valid ? from_base32z(str, str + N - 1, decoded) : decoded;
             while (end < std::end(decoded))
-                *end++ = 0;
+                *end++ = Char{0};
         }
 
-        char decoded[from_base32z_size(N - 1) + 1];  // Includes a null byte so that view().data()
+        Char decoded[from_base32z_size(N - 1) + 1];  // Includes a null byte so that view().data()
         bool valid;                                  //   is a valid c string
-        template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
         constexpr std::basic_string_view<Char> view() const {
-            return {reinterpret_cast<const Char*>(decoded), valid ? sizeof(decoded) - 1 : 0};
+            return {decoded, valid ? sizeof(decoded) - 1 : 0};
         }
+    };
+    template <size_t N>
+    struct c_b32z_literal : b32z_literal<char, N> {
+        consteval c_b32z_literal(const char (&h)[N]) : b32z_literal<char, N>{h} {}
+    };
+    template <size_t N>
+    struct b_b32z_literal : b32z_literal<std::byte, N> {
+        consteval b_b32z_literal(const char (&h)[N]) : b32z_literal<std::byte, N>{h} {}
+    };
+    template <size_t N>
+    struct u_b32z_literal : b32z_literal<unsigned char, N> {
+        consteval u_b32z_literal(const char (&h)[N]) : b32z_literal<unsigned char, N>{h} {}
     };
 }  // namespace detail
 
 inline namespace literals {
-    template <detail::b32z_literal Base32z>
+    template <detail::c_b32z_literal Base32z>
     constexpr std::string_view operator""_b32z() {
         static_assert(Base32z.valid, "invalid base32z literal");
         return Base32z.view();
     }
 
-    template <detail::b32z_literal Base32z>
+    template <detail::b_b32z_literal Base32z>
     constexpr std::basic_string_view<std::byte> operator""_b32z_b() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.template view<std::byte>();
+        return Base32z.view();
     }
 
-    template <detail::b32z_literal Base32z>
+    template <detail::u_b32z_literal Base32z>
     constexpr std::basic_string_view<unsigned char> operator""_b32z_u() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.template view<unsigned char>();
+        return Base32z.view();
     }
 }  // namespace literals
 

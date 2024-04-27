@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -400,42 +401,53 @@ std::string from_base64(const std::basic_string<CharT>& s) {
 }
 
 namespace detail {
-    template <size_t N>
+    template <basic_char Char, size_t N>
     struct b64_literal {
         consteval b64_literal(const char (&b64)[N]) {
             bool ok = is_base64(b64, b64 + N - 1);
             auto end = ok ? from_base64(b64, b64 + N - 1, decoded) : decoded;
             valid = ok ? static_cast<decltype(valid)>(std::end(decoded) - end) : 0;
             while (end < std::end(decoded))
-                *end++ = 0;
+                *end++ = Char{0};
         }
 
-        char decoded[from_base64_size(N - 1) + 1];
+        Char decoded[from_base64_size(N - 1) + 1];
         uint8_t valid;  // 0 == invalid, otherwise the number of trailing null bytes (1-3)
-        template <typename Char = char, typename = std::enable_if_t<sizeof(Char) == 1>>
         constexpr std::basic_string_view<Char> view() const {
-            return {reinterpret_cast<const Char*>(decoded), valid ? sizeof(decoded) - valid : 0};
+            return {decoded, valid ? sizeof(decoded) - valid : 0};
         }
+    };
+    template <size_t N>
+    struct c_b64_literal : b64_literal<char, N> {
+        consteval c_b64_literal(const char (&h)[N]) : b64_literal<char, N>{h} {}
+    };
+    template <size_t N>
+    struct b_b64_literal : b64_literal<std::byte, N> {
+        consteval b_b64_literal(const char (&h)[N]) : b64_literal<std::byte, N>{h} {}
+    };
+    template <size_t N>
+    struct u_b64_literal : b64_literal<unsigned char, N> {
+        consteval u_b64_literal(const char (&h)[N]) : b64_literal<unsigned char, N>{h} {}
     };
 }  // namespace detail
 
 inline namespace literals {
-    template <detail::b64_literal Base64>
+    template <detail::c_b64_literal Base64>
     constexpr std::string_view operator""_b64() {
         static_assert(Base64.valid, "Invalid base64 literal");
         return Base64.view();
     }
 
-    template <detail::b64_literal Base64>
+    template <detail::b_b64_literal Base64>
     constexpr std::basic_string_view<std::byte> operator""_b64_b() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.template view<std::byte>();
+        return Base64.view();
     }
 
-    template <detail::b64_literal Base64>
+    template <detail::u_b64_literal Base64>
     constexpr std::basic_string_view<unsigned char> operator""_b64_u() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.template view<unsigned char>();
+        return Base64.view();
     }
 }  // namespace literals
 

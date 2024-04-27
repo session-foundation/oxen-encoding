@@ -12,6 +12,10 @@ const std::string pk_hex = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce7
 const std::string pk_b32z = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry";
 const std::string pk_b64 = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g=";
 
+constexpr auto pk_hex_constexpr = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce730f946e14b88"_hex;
+constexpr auto pk_b32z_constexpr = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry"_b32z;
+constexpr auto pk_b64_constexpr = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g="_b64;
+
 const std::basic_string_view<std::byte> operator ""_bsv(const char* s, size_t n) {
     return {reinterpret_cast<const std::byte*>(s), n};
 }
@@ -49,6 +53,7 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE(std::all_of(odd_hex.begin(), odd_hex.end(), oxenc::is_hex_digit<char>));
 
+    REQUIRE(pk == pk_hex_constexpr);
     REQUIRE(oxenc::from_hex(pk_hex) == pk);
     REQUIRE(oxenc::to_hex(pk) == pk_hex);
 
@@ -143,6 +148,7 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     // This one won't round-trip to the same value since it has ignored garbage bytes at the end
     REQUIRE(oxenc::to_base32z(oxenc::from_base32z("ybndrf4"s)) == "ybndrfa");
 
+    REQUIRE(pk == pk_b32z_constexpr);
     REQUIRE(oxenc::to_base32z(pk) == pk_b32z);
     REQUIRE(oxenc::to_base32z(pk.begin(), pk.end()) == pk_b32z);
     REQUIRE(oxenc::from_base32z(pk_b32z) == pk);
@@ -300,6 +306,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     // "ABCD===="_b64;
     // "ABCDE"_b64;
 
+    REQUIRE(pk == pk_b64_constexpr);
     REQUIRE(oxenc::to_base64(pk) == pk_b64);
     REQUIRE(oxenc::to_base64(pk.begin(), pk.end()) == pk_b64);
     REQUIRE(oxenc::from_base64(pk_b64) == pk);

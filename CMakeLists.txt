@@ -48,6 +48,8 @@ configure_file(liboxenc.pc.in liboxenc.pc @ONLY)
 
 add_library(oxenc INTERFACE)
 
+target_compile_features(oxenc INTERFACE cxx_std_20)
+
 target_include_directories(oxenc
     INTERFACE
         $<INSTALL_INTERFACE:>

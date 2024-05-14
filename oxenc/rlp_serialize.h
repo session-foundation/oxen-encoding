@@ -146,6 +146,24 @@ inline std::string rlp_serialize(const char* str) {
     return rlp_serialize(std::string_view{str});
 }
 
+// Takes a spannable container of basic char types representing a big-endian integer value and
+// returns the sub-span of that container that represents the value as a big integer value (which
+// requires removal of leading 0 bytes for RLP).  For example, passing "0000000000001234"_hex would
+// return the span "1234"_hex, which is how such an integer must be encoded for RLP.
+template <basic_char Char>
+std::span<const Char> rlp_big_integer(std::span<const Char> s) {
+    size_t i = 0;
+    while (i < s.size() && s[i] == Char{0})
+        i++;
+    return s.subspan(i);
+}
+
+template <detail::span_convertible Container>
+requires basic_char<std::remove_cvref_t<typename Container::value_type>>
+auto rlp_big_integer(const Container& c) {
+    return rlp_big_integer(std::span<const typename Container::value_type>{c});
+}
+
 namespace detail {
     inline std::string rlp_encode_payload(std::string_view payload, unsigned char base_code) {
         std::string result;

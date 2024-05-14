@@ -27,6 +27,25 @@ TEST_CASE("RLP serialization", "[rlp][serialization]") {
     CHECK(oxenc::to_hex(rlp_serialize(v2)) == "8568656c6c6f");
     CHECK(oxenc::to_hex(rlp_serialize(v3)) == "c40a8203e8");
 
+    auto big_int1 = "0000000000123456"_hex;
+    auto big_int2 = "0100000000123456"_hex;
+    auto big_int3 = "00000000001234560000000000000000"_hex;
+    auto big_int4 = "0000000000000000000000000000000000000000000000000000000000abcdef"_hex;
+    auto big_int5 = "000000000000000000000000000000000000000000000000000000000abcdef9"_hex;
+    auto big_int6 =
+            "800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000abcdef9"_hex;
+    auto big_int7 = "000000000000000000000000000000"_hex;
+
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int1))) == "83123456");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int2))) == "880100000000123456");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int3))) == "8b1234560000000000000000");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int4))) == "83abcdef");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int5))) == "840abcdef9");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int6))) ==
+          "b838800000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          "000000000000000000000abcdef9");
+    CHECK(oxenc::to_hex(rlp_serialize(rlp_big_integer(big_int7))) == "80");
+
     std::vector<V> big_v;
     CHECK(oxenc::to_hex(rlp_serialize(big_v)) == "c0");
     big_v.emplace_back(unsigned{1234});
@@ -130,5 +149,4 @@ TEST_CASE("RLP serialization", "[rlp][serialization]") {
     x.push_back(std::move(y));
 
     CHECK(oxenc::to_hex(rlp_serialize(x)) == "c7c0c1c0c3c0c1c0");
-
 }

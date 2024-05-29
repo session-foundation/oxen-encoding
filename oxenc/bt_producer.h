@@ -329,15 +329,28 @@ class bt_list_producer {
         return *this;
     }
 
-    /// Appends elements from the range [from, to) to the list.  This does *not* append the elements
-    /// as a sublist: for that you should use `append_list`
+    /// Appends elements from the range [from, to) to the existing list (i.e. without creating a
+    /// sublist).
     template <typename ForwardIt>
-    void append(ForwardIt from, ForwardIt to) {
+    void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         while (from != to)
             append_impl(*from++);
         append_intermediate_ends();
+    }
+
+    /// Appends elements from the input container to the existing list (i.e. without creating a
+    /// sublist).
+    template <bt_input_list_container L>
+    void extend(const L& list) {
+        extend(list.begin(), list.end());
+    }
+
+    // Deprecated alias for `extend(...)`.  This does *not* append the elements as a sublist.
+    template <typename ForwardIt>
+    [[deprecated("Use extend instead")]] void append(ForwardIt from, ForwardIt to) {
+        extend(from, to);
     }
 
     /// Appends an input list container as a sublist.  Equivalenet to append_list(tuple).  Note that
@@ -381,7 +394,7 @@ class bt_list_producer {
 
     template <typename ForwardIt>
     void append_list(ForwardIt from, ForwardIt to) {
-        append_list().append(from, to);
+        append_list().extend(from, to);
     }
 
     /// Appends a compatible input list container as a sublist
@@ -572,14 +585,14 @@ class bt_dict_producer : bt_list_producer {
     /// Appends pairs from the range [from, to) to the dict.  Elements must have a .first
     /// convertible to a string_view, and a .second that is either string view convertible or an
     /// integer.  This does *not* append the elements as a subdict: for that you should use
-    /// something like: `l.append_dict().append(key, from, to);`
+    /// something like: `l.append_dict().extend(key, from, to);`
     ///
     /// Also note that the range *must* be sorted by keys, which means either using an ordered
     /// container (e.g. std::map) or a manually ordered container (such as a vector or list of
     /// pairs).  unordered_map, however, is not acceptable.
     template <typename ForwardIt>
     requires(!string_view_compatible<ForwardIt>)
-    void append(ForwardIt from, ForwardIt to) {
+    void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         using KeyType = std::remove_cv_t<std::decay_t<decltype(from->first)>>;
@@ -598,6 +611,12 @@ class bt_dict_producer : bt_list_producer {
             append_impl(v);
         }
         append_intermediate_ends();
+    }
+
+    template <typename ForwardIt>
+    requires(!string_view_compatible<ForwardIt>)
+    [[deprecated("Use extend instead")]] void append(ForwardIt from, ForwardIt to) {
+        extend(from, to);
     }
 
     /// Appends a sub-dict value to this dict with the given key.  Returns a new bt_dict_producer
@@ -647,7 +666,7 @@ class bt_dict_producer : bt_list_producer {
     /// key), and then appends the given iterator range to it.
     template <typename ForwardIt>
     void append_list(std::string_view key, ForwardIt from, ForwardIt to) {
-        append_list(key).append(from, to);
+        append_list(key).extend(from, to);
     }
 
     /// Appends a list to this dict with the given key (which must be ascii-larger than the previous

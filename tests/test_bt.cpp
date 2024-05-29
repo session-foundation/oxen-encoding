@@ -276,7 +276,7 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
     lp += 42;
     CHECK(lp.view() == "l3:abci42ee");
     std::vector<int> randos = {{1, 17, -999}};
-    lp.append(randos.begin(), randos.end());
+    lp.extend(randos.begin(), randos.end());
     CHECK(lp.view() == "l3:abci42ei1ei17ei-999ee");
 
     {
@@ -374,7 +374,7 @@ TEST_CASE("bt streaming dict producer", "[bt][dict][producer]") {
     CHECK(dp.view() == "d3:foo3:bar4:foo\0i-333222111e6:myListl0:i2ei42ee1:pd0:i1eee"sv);
 
     std::map<std::string, int> to_append{{"q", 1}, {"r", 2}, {"~", 3}, {"~1", 4}};
-    dp.append(to_append.begin(), to_append.end());
+    dp.extend(to_append.begin(), to_append.end());
 
     CHECK(dp.view() ==
           "d3:foo3:bar4:foo\0i-333222111e6:myListl0:i2ei42ee1:pd0:i1ee1:qi1e1:ri2e1:~i3e2:~1i4ee"sv);

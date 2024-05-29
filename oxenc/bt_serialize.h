@@ -201,18 +201,6 @@ namespace detail {
         }
     };
 
-    /// Partial dict validity; we don't check the second type for serializability, that will be
-    /// handled via the base case static_assert if invalid.
-    template <typename T>
-    concept bt_input_dict_container =
-            (std::same_as<std::string, std::remove_cv_t<typename T::value_type::first_type>> ||
-             std::same_as<
-                     std::string_view,
-                     std::remove_cv_t<typename T::value_type::first_type>>)&&requires {
-                typename T::const_iterator;           // is const iterable
-                typename T::value_type::second_type;  // has a second type
-            };
-
     /// Determines whether the type looks like something we can insert into (using
     /// `v.insert(v.end(), x)`)
     template <typename T>
@@ -287,16 +275,6 @@ namespace detail {
         }
     };
 
-    /// Accept anything that looks iterable; value serialization validity isn't checked here (it
-    /// fails via the base case static assert).
-    template <typename T>
-    concept bt_input_list_container =
-            !std::same_as<T, std::string> && !std::same_as<T, std::string_view> &&
-            !bt_input_dict_container<T> && requires {
-                typename T::const_iterator;
-                typename T::value_type;
-            };
-
     template <typename T>
     concept bt_output_list_container =
             !std::same_as<T, std::string> && !bt_output_dict_container<T> && bt_insertable<T>;
@@ -342,29 +320,29 @@ namespace detail {
         }
     };
 
-    /// Serializes a tuple or pair of serializable values (as a list on the wire)
+    /// Serializes a tuple, pair, or array of serializable values (as a list on the wire)
 
-    /// Common implementation for both tuple and pair:
-    template <template <typename...> typename Tuple, typename... T>
-    struct bt_serialize_tuple {
+    /// Common implementation for tuple/pair/array:
+    template <tuple_like Tuple>
+    struct bt_serialize<Tuple> {
       private:
         template <size_t... Is>
-        void operator()(std::ostream& os, const Tuple<T...>& elems, std::index_sequence<Is...>) {
+        void operator()(std::ostream& os, const Tuple& elems, std::index_sequence<Is...>) {
             os << 'l';
-            (bt_serialize<T>{}(os, std::get<Is>(elems)), ...);
+            (bt_serialize<std::tuple_element_t<Is, Tuple>>{}(os, std::get<Is>(elems)), ...);
             os << 'e';
         }
 
       public:
-        void operator()(std::ostream& os, const Tuple<T...>& elems) {
-            operator()(os, elems, std::index_sequence_for<T...>{});
+        void operator()(std::ostream& os, const Tuple& elems) {
+            operator()(os, elems, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
         }
     };
-    template <template <typename...> typename Tuple, typename... T>
-    struct bt_deserialize_tuple {
+    template <tuple_like Tuple>
+    struct bt_deserialize<Tuple> {
       private:
         template <size_t... Is>
-        void operator()(std::string_view& s, Tuple<T...>& elems, std::index_sequence<Is...>) {
+        void operator()(std::string_view& s, Tuple& elems, std::index_sequence<Is...>) {
             // Smallest list is 2 bytes "le", for an empty list.
             if (s.size() < 2)
                 throw bt_deserialize_invalid(
@@ -373,7 +351,7 @@ namespace detail {
                 throw bt_deserialize_invalid_type(
                         "Deserialization of tuple failed: expected 'l', found '"s + s[0] + "'"s);
             s.remove_prefix(1);
-            (bt_deserialize<T>{}(s, std::get<Is>(elems)), ...);
+            (bt_deserialize<std::tuple_element_t<Is, Tuple>>{}(s, std::get<Is>(elems)), ...);
             if (s.empty())
                 throw bt_deserialize_invalid(
                         "Deserialization failed: encountered end of string before tuple was "
@@ -385,30 +363,15 @@ namespace detail {
         }
 
       public:
-        void operator()(std::string_view& s, Tuple<T...>& elems) {
-            operator()(s, elems, std::index_sequence_for<T...>{});
+        void operator()(std::string_view& s, Tuple& elems) {
+            operator()(s, elems, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
         }
     };
-    template <typename... T>
-    struct bt_serialize<std::tuple<T...>> : bt_serialize_tuple<std::tuple, T...> {};
-    template <typename... T>
-    struct bt_deserialize<std::tuple<T...>> : bt_deserialize_tuple<std::tuple, T...> {};
-    template <typename S, typename T>
-    struct bt_serialize<std::pair<S, T>> : bt_serialize_tuple<std::pair, S, T> {};
-    template <typename S, typename T>
-    struct bt_deserialize<std::pair<S, T>> : bt_deserialize_tuple<std::pair, S, T> {};
-
-    template <typename T>
-    inline constexpr bool is_bt_tuple = false;
-    template <typename... T>
-    inline constexpr bool is_bt_tuple<std::tuple<T...>> = true;
-    template <typename S, typename T>
-    inline constexpr bool is_bt_tuple<std::pair<S, T>> = true;
 
     template <typename T>
     concept bt_deserializable =
             std::same_as<T, std::string> || std::integral<T> || bt_output_dict_container<T> ||
-            bt_output_list_container<T> || is_bt_tuple<T>;
+            bt_output_list_container<T> || tuple_like<T>;
 
     // General template and base case; this base will only actually be invoked when Ts... is empty,
     // which means we reached the end without finding any variant type capable of holding the value.
@@ -429,7 +392,7 @@ namespace detail {
     struct bt_deserialize_try_variant_impl<Variant, T, Ts...> {
         void operator()(std::string_view& s, Variant& variant) {
             if (bt_output_list_container<T>    ? s[0] == 'l'
-                : is_bt_tuple<T>               ? s[0] == 'l'
+                : tuple_like<T>                ? s[0] == 'l'
                 : bt_output_dict_container<T>  ? s[0] == 'd'
                 : std::integral<T>             ? s[0] == 'i'
                 : std::same_as<T, std::string> ? s[0] >= '0' && s[0] <= '9'
@@ -503,15 +466,6 @@ namespace detail {
         bt_serialize<T>{}(os, s.val);
         return os;
     }
-
-    // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
-    // single-byte type Char.
-    template <typename T>
-    constexpr bool is_string_like = false;
-    template <typename Char>
-    inline constexpr bool is_string_like<std::basic_string<Char>> = sizeof(Char) == 1;
-    template <typename Char>
-    inline constexpr bool is_string_like<std::basic_string_view<Char>> = sizeof(Char) == 1;
 
 }  // namespace detail
 
@@ -629,21 +583,21 @@ IntType get_int(const bt_value& v) {
 }
 
 namespace detail {
-    template <typename Tuple, size_t... Is>
+    template <tuple_like Tuple, size_t... Is>
     void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>);
 }
 
-/// Converts a bt_list into the given template std::tuple or std::pair.  Throws a
+/// Converts a bt_list into the given template std::tuple, std::pair, or std::array.  Throws a
 /// std::invalid_argument if the list has the wrong size or wrong element types.  Supports recursion
 /// (i.e. if the tuple itself contains tuples or pairs).  The tuple (or nested tuples) may only
 /// contain integral types, strings, string_views, bt_list, bt_dict, and tuples/pairs of those.
-template <typename Tuple>
+template <tuple_like Tuple>
 Tuple get_tuple(const bt_list& x) {
     Tuple t;
     detail::get_tuple_impl(t, x, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
     return t;
 }
-template <typename Tuple>
+template <tuple_like Tuple>
 Tuple get_tuple(const bt_value& x) {
     return get_tuple<Tuple>(var::get<bt_list>(static_cast<const bt_variant&>(x)));
 }
@@ -657,7 +611,7 @@ namespace detail {
         const bt_variant& v = *it++;
         if constexpr (std::integral<T>) {
             t = oxenc::get_int<T>(v);
-        } else if constexpr (is_bt_tuple<T>) {
+        } else if constexpr (tuple_like<T>) {
             if (std::holds_alternative<bt_list>(v))
                 throw std::invalid_argument{
                         "Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
@@ -673,7 +627,7 @@ namespace detail {
             t = var::get<T>(v);
         }
     }
-    template <typename Tuple, size_t... Is>
+    template <tuple_like Tuple, size_t... Is>
     void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>) {
         if (l.size() != sizeof...(Is))
             throw std::invalid_argument{"Unable to convert tuple: bt_list has wrong size"};
@@ -685,12 +639,12 @@ namespace detail {
     T consume_impl(Consumer& c) {
         if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
-        else if constexpr (detail::is_string_like<T>)
+        else if constexpr (is_string_like<T>)
             return T{c.template consume_string_view<typename T::value_type>()};
-        else if constexpr (std::same_as<T, bt_dict>)
-            return c.consume_dict();
-        else if constexpr (std::same_as<T, bt_list>)
-            return c.consume_list();
+        else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
+            return c.template consume_list<T>();
+        else if constexpr (std::same_as<T, bt_dict> || bt_output_dict_container<T>)
+            return c.template consume_dict<T>();
         else if constexpr (std::same_as<T, bt_dict_consumer>)
             return c.consume_dict_consumer();
         else {

@@ -201,18 +201,6 @@ namespace detail {
         }
     };
 
-    /// Partial dict validity; we don't check the second type for serializability, that will be
-    /// handled via the base case static_assert if invalid.
-    template <typename T>
-    concept bt_input_dict_container =
-            (std::same_as<std::string, std::remove_cv_t<typename T::value_type::first_type>> ||
-             std::same_as<
-                     std::string_view,
-                     std::remove_cv_t<typename T::value_type::first_type>>)&&requires {
-                typename T::const_iterator;           // is const iterable
-                typename T::value_type::second_type;  // has a second type
-            };
-
     /// Determines whether the type looks like something we can insert into (using
     /// `v.insert(v.end(), x)`)
     template <typename T>
@@ -286,19 +274,6 @@ namespace detail {
             s.remove_prefix(1);  // Consume the 'e'
         }
     };
-
-    template <typename Tuple>
-    concept tuple_like = requires { std::tuple_size<Tuple>::value; };
-
-    /// Accept anything that looks iterable; value serialization validity isn't checked here (it
-    /// fails via the base case static assert).
-    template <typename T>
-    concept bt_input_list_container =
-            !std::same_as<T, std::string> && !std::same_as<T, std::string_view> && !tuple_like<T> &&
-            !bt_input_dict_container<T> && requires {
-                typename T::const_iterator;
-                typename T::value_type;
-            };
 
     template <typename T>
     concept bt_output_list_container =
@@ -492,15 +467,6 @@ namespace detail {
         return os;
     }
 
-    // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
-    // single-byte type Char.
-    template <typename T>
-    constexpr bool is_string_like = false;
-    template <typename Char>
-    inline constexpr bool is_string_like<std::basic_string<Char>> = sizeof(Char) == 1;
-    template <typename Char>
-    inline constexpr bool is_string_like<std::basic_string_view<Char>> = sizeof(Char) == 1;
-
 }  // namespace detail
 
 /// Returns a wrapper around a value reference that can serialize the value directly to an output
@@ -625,13 +591,13 @@ namespace detail {
 /// std::invalid_argument if the list has the wrong size or wrong element types.  Supports recursion
 /// (i.e. if the tuple itself contains tuples or pairs).  The tuple (or nested tuples) may only
 /// contain integral types, strings, string_views, bt_list, bt_dict, and tuples/pairs of those.
-template <detail::tuple_like Tuple>
+template <tuple_like Tuple>
 Tuple get_tuple(const bt_list& x) {
     Tuple t;
     detail::get_tuple_impl(t, x, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
     return t;
 }
-template <detail::tuple_like Tuple>
+template <tuple_like Tuple>
 Tuple get_tuple(const bt_value& x) {
     return get_tuple<Tuple>(var::get<bt_list>(static_cast<const bt_variant&>(x)));
 }
@@ -673,7 +639,7 @@ namespace detail {
     T consume_impl(Consumer& c) {
         if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
-        else if constexpr (detail::is_string_like<T>)
+        else if constexpr (is_string_like<T>)
             return T{c.template consume_string_view<typename T::value_type>()};
         else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
             return c.template consume_list<T>();

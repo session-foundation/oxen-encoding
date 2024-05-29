@@ -295,12 +295,14 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
     }
 
     lp.append_list().append_list().append_list() += "omg"s;
-    CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeee");
+    lp.append(std::array<int, 0>{});
+    lp.append_list(std::array{1});
+    CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eee");
 
     {
         auto dict = lp.append_dict();
         CHECK(dict.view() == "de");
-        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeedee");
+        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eedee");
 
         CHECK_THROWS_AS(lp.append(1), std::logic_error);
 
@@ -308,13 +310,19 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
         dict.append("g", 42);
 
         CHECK(dict.view() == "d3:foo3:bar1:gi42ee");
-        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42eee");
+        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42eee");
 
         dict.append_list("h").append_dict().append_dict("a").append_list("A") += 999;
         CHECK(dict.view() == "d3:foo3:bar1:gi42e1:hld1:ad1:Ali999eeeeee");
         CHECK(lp.view() ==
-              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
               "Ali999eeeeeee");
+
+        dict.append("i", std::array{1, 2, 3});
+        dict.append_list("j", std::tuple<>{});
+        CHECK(lp.view() ==
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "Ali999eeeee1:ili1ei2ei3ee1:jleee");
     }
 
     if (external_buffer) {
@@ -324,8 +332,8 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
         auto str = std::move(lp).str();
         CHECK(str.capacity() == orig_cap);
         CHECK(str ==
-              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:"
-              "Ali999eeeeeee");
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "Ali999eeeee1:ili1ei2ei3ee1:jleee");
 
         CHECK(lp.str_ref().capacity() < 32);  // SSO sizes vary across compilers
         CHECK(lp.view() == "le");
@@ -501,13 +509,13 @@ TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
                     {"G", "tomato sauce"},
                     {"I", 69},
                     {"K", 420},
-                    {"L", bt_list{1,2,3}},
+                    {"L", bt_list{1, 2, 3}},
                     {"M", bt_dict{{"Q", "Q"}}}});
 
     bt_dict_consumer btdp{data};
 
     [[maybe_unused]] int a, c, i, k;
-    [[maybe_unused]] std::array l{1,2,3};
+    [[maybe_unused]] std::array l{1, 2, 3};
     std::string e, g;
     bt_dict bd;
 
@@ -538,7 +546,7 @@ TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
 
     SECTION("Success cases - consuming array") {
         REQUIRE_NOTHROW(l = btdp.require<std::array<int, 3>>("L"));
-        CHECK(l == std::array{1,2,3});
+        CHECK(l == std::array{1, 2, 3});
     }
 
     SECTION("Success cases - string conversion types") {

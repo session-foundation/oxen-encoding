@@ -11,12 +11,11 @@
 #include <unordered_map>
 #include <utility>
 
-#include "common.h"
-
 #ifndef NDEBUG
 #include "bt_serialize.h"
 #endif
 
+#include "common.h"
 #include "variant.h"
 
 namespace oxenc {
@@ -331,7 +330,7 @@ class bt_list_producer {
     }
 
     /// Appends elements from the range [from, to) to the list.  This does *not* append the elements
-    /// as a sublist: for that you should use something like: `l.append_list().append(from, to);`
+    /// as a sublist: for that you should use `append_list`
     template <typename ForwardIt>
     void append(ForwardIt from, ForwardIt to) {
         if (has_child)
@@ -339,6 +338,20 @@ class bt_list_producer {
         while (from != to)
             append_impl(*from++);
         append_intermediate_ends();
+    }
+
+    /// Appends an input list container as a sublist.  Equivalenet to append_list(tuple).  Note that
+    /// this is not equivalent to the iterator pair overload above: that appends to the current
+    /// list, while this one creates a new sublist and appends the container elements to that.
+    template <bt_input_list_container L>
+    void append(const L& list) {
+        append_list(list);
+    }
+
+    /// Appends a tuple/pair/array as a sublist.  Equivalent to append_list(tuple).
+    template <tuple_like Tuple>
+    void append(const Tuple& tuple) {
+        append_list(tuple);
     }
 
     /// Appends an optional value: the value will be appended as if by calling `.append(*val)` if
@@ -366,6 +379,21 @@ class bt_list_producer {
     /// outlive the parent.
     bt_list_producer append_list();
 
+    template <typename ForwardIt>
+    void append_list(ForwardIt from, ForwardIt to) {
+        append_list().append(from, to);
+    }
+
+    /// Appends a compatible input list container as a sublist
+    template <bt_input_list_container L>
+    void append_list(const L& input) {
+        append_list(input.begin(), input.end());
+    }
+
+    /// Appends a tuple/pair/array as a sublist
+    template <tuple_like Tuple>
+    void append_list(const Tuple& t);
+
     /// Appends a dict to this list.  Returns a new bt_dict_producer that references the parent
     /// list.  The parent cannot be added to until the subdict is destroyed.  This is meant to be
     /// used via RAII (see append_list() for details).
@@ -373,6 +401,12 @@ class bt_list_producer {
     /// If doing more complex lifetime management, take care not to allow the child instance to
     /// outlive the parent.
     bt_dict_producer append_dict();
+
+    /// There is no append_dict() taking a generic dict-like object because we can't ensure it
+    /// iterates in sorted order, and therefore we can't append it without copying into a sorted
+    /// container.
+    template <bt_input_dict_container D>
+    void append_dict(const D&) = delete;
 
     /// Appends a bt_value, bt_dict, or bt_list to this bt_list.  You must include the
     /// bt_value_producer.h header (either directly or via bt.h) to use this method.
@@ -513,6 +547,20 @@ class bt_dict_producer : bt_list_producer {
         append_intermediate_ends();
     }
 
+    /// Appends an input list container as a sublist.  Equivalenet to append_list(tuple).  Note that
+    /// this is not equivalent to the iterator pair overload above: that appends to the current
+    /// list, while this one creates a new sublist and appends the container elements to that.
+    template <bt_input_list_container L>
+    void append(std::string_view key, const L& list) {
+        append_list(key, list);
+    }
+
+    /// Appends a tuple/pair/array as a sublist.  Equivalent to append_list(tuple).
+    template <tuple_like Tuple>
+    void append(std::string_view key, const Tuple& tuple) {
+        append_list(key, tuple);
+    }
+
     /// Appends a key-value pair with an optional value, *if* the optional is set.  If the value is
     /// nullopt, nothing is appended.
     template <typename T>
@@ -594,6 +642,24 @@ class bt_dict_producer : bt_list_producer {
         append_impl(key);
         return bt_list_producer{this};
     }
+
+    /// Appends a list to this dict with the given key (which must be ascii-larger than the previous
+    /// key), and then appends the given iterator range to it.
+    template <typename ForwardIt>
+    void append_list(std::string_view key, ForwardIt from, ForwardIt to) {
+        append_list(key).append(from, to);
+    }
+
+    /// Appends a list to this dict with the given key (which must be ascii-larger than the previous
+    /// key), and then appends all the element of the given input list compatible container to it.
+    template <bt_input_list_container L>
+    void append_list(std::string_view key, const L& list) {
+        append_list(key, list.begin(), list.end());
+    }
+
+    /// Appends a tuple/pair/array as a sublist with the given key.
+    template <tuple_like Tuple>
+    void append_list(std::string_view key, const Tuple& tuple);
 
     /// Appends a bt_value, bt_dict, or bt_list to this bt_dict.  You must include the
     /// bt_value_producer.h header (either directly or via bt.h) to use this method.
@@ -738,6 +804,25 @@ inline bt_dict_producer bt_list_producer::append_dict() {
     if (has_child)
         throw std::logic_error{"Cannot call append_dict while another nested list/dict is active"};
     return bt_dict_producer{this};
+}
+
+namespace detail {
+
+    template <tuple_like Tuple, size_t... Is>
+    inline void append_tuple(bt_list_producer l, const Tuple& t, std::index_sequence<Is...>) {
+        (l.append(std::get<Is>(t)), ...);
+    }
+
+}  // namespace detail
+
+template <tuple_like Tuple>
+void bt_list_producer::append_list(const Tuple& t) {
+    detail::append_tuple(append_list(), t, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+}
+
+template <tuple_like Tuple>
+void bt_dict_producer::append_list(std::string_view key, const Tuple& t) {
+    detail::append_tuple(append_list(key), t, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
 }
 
 }  // namespace oxenc

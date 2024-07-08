@@ -1,3 +1,11 @@
+oxen-encoding (1.1.0-2~ubuntu2004) focal; urgency=medium
+
+  * Disable -Werror for deb builds
+  * use g++-10 on focal
+  * add missing header to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 08 Jul 2024 15:14:52 -0300
+
 oxen-encoding (1.1.0-1~ubuntu2004) focal; urgency=medium
 
   [ dr7ana ]

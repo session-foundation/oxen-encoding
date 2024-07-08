@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.10)  # bionic's cmake version
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Has to be set before `project()`, and ignored on non-macos:
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15 CACHE STRING "macOS deployment target (Apple clang only)")
 
 find_program(CCACHE_PROGRAM ccache)
 if(CCACHE_PROGRAM)
@@ -16,12 +16,12 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(oxenc
-    VERSION 1.0.10
+    VERSION 1.1.0
     DESCRIPTION "oxenc - Base 16/32/64 and Bittorrent Encoding/Decoding Header Only Library"
     LANGUAGES CXX)
 
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -38,6 +38,8 @@ endif()
 option(OXENC_BUILD_TESTS "Building and perform oxenc tests" ${oxenc_IS_TOPLEVEL_PROJECT})
 option(OXENC_BUILD_DOCS "Build oxenc documentation" ${oxenc_IS_TOPLEVEL_PROJECT})
 option(OXENC_INSTALL "Add oxenc headers to install target" ${oxenc_IS_TOPLEVEL_PROJECT})
+option(OXENC_WARNINGS_AS_ERRORS "Turn on -Werror" ${oxenc_IS_TOPLEVEL_PROJECT})
+option(OXENC_EXTRA_WARNINGS "Turn on various extra warnings" ${oxenc_IS_TOPLEVEL_PROJECT})
 
 
 configure_file(oxenc/version.h.in oxenc/version.h @ONLY)
@@ -46,12 +48,21 @@ configure_file(liboxenc.pc.in liboxenc.pc @ONLY)
 
 add_library(oxenc INTERFACE)
 
+target_compile_features(oxenc INTERFACE cxx_std_20)
+
 target_include_directories(oxenc
     INTERFACE
         $<INSTALL_INTERFACE:>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 add_library(oxenc::oxenc ALIAS oxenc)
+
+if(OXENC_EXTRA_WARNINGS)
+    target_compile_options(oxenc INTERFACE -Wall -Wextra -Wconversion -Wpedantic -Wcast-align -Wunused)
+endif()
+if(OXENC_WARNINGS_AS_ERRORS)
+    target_compile_options(oxenc INTERFACE -Werror)
+endif()
 
 export(
     TARGETS oxenc

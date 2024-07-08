@@ -87,6 +87,7 @@ if(OXENC_INSTALL)
     oxenc/bt_value.h
     oxenc/bt_value_producer.h
     oxenc/byte_type.h
+    oxenc/common.h
     oxenc/endian.h
     oxenc/hex.h
     oxenc/variant.h

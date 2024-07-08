@@ -1,3 +1,33 @@
+oxen-encoding (1.1.0-1~deb12) bookworm; urgency=medium
+
+  [ dr7ana ]
+  * cpp20 bump (#31)
+
+  [ Jason Rhinelander ]
+  * Add ethereum RLP serializer
+  * CI: reformat with jsonnetfmt (no changes)
+  * CI: drop unsupported distros; more macos; remove lokinet-ci-
+  * Address various extended warning triggers
+  * Embrace C++20
+  * Workaround for gcc/armhf bad warning
+  * constexpr _hex, _b32z, and _b64
+  * Fix comment ^ position marking the difference
+  * Remove invalid base64 value
+  * Fix constexpr under clang
+  * Fix oxenc C++20 compilation for oxenc
+  * Add rlp_big_integer
+  * Allow consuming std::array's; allow other output types in consume
+  * Allow lists/tuples for producer append
+  * Rename iterator-pair append to extend
+
+  [ dr7ana ]
+  * include tuple in header (#36)
+
+  [ Jason Rhinelander ]
+  * debian/control updates for 1.1.0 changes
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 08 Jul 2024 12:04:09 -0300
+
 oxen-encoding (1.0.10-1~deb12) bookworm; urgency=medium
 
   [ dr7ana ]

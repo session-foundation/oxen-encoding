@@ -2,3 +2,7 @@
 
 %:
 	dh $@
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-DOXENC_WARNINGS_AS_ERRORS=OFF

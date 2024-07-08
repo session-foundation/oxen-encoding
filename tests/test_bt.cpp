@@ -208,9 +208,14 @@ TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
     using V3 = std::tuple<std::string, int, bt_dict>;
     REQUIRE(get_tuple<V3>(c) == V3{"hello", -4, {{"a", -1}, {"b", -2}}});
 
-    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:hello3:omge")));        // too few
-    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:hello3:omgi1ei1ee")));  // too many
-    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:helloi1ei1ee")));       // wrong type
+    bt_value d = bt_get("li1ei10ei100ee");
+    REQUIRE(get_tuple<std::array<int, 3>>(d) == std::array<int, 3>{1, 10, 100});
+
+    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:hello3:omge")));                  // too few
+    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:hello3:omgi1ei1ee")));            // too many
+    REQUIRE_THROWS(get_tuple<V1>(bt_get("l5:helloi1ei1ee")));                 // wrong type
+    REQUIRE_THROWS(get_tuple<std::array<int, 3>>(bt_get("li1ei2ee")));        // too few
+    REQUIRE_THROWS(get_tuple<std::array<int, 3>>(bt_get("li1ei2ei3ei4ee")));  // too few
 
     // Construct a bt_value from tuples:
     bt_value l{std::make_tuple(3, 4, "hi"sv)};
@@ -222,12 +227,13 @@ TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
 TEST_CASE("bt allocation-free consumer", "[bt][dict][list][consumer]") {
 
     // Consumer deserialization:
-    bt_list_consumer lc{"li1ei2eli3ei4e2:hiel3:foo3:barei-4ee"};
+    bt_list_consumer lc{"li1ei2eli3ei4e2:hiel3:foo3:bareli1ei2ei3eei-4ee"};
     REQUIRE(lc.consume_integer<int>() == 1);
     REQUIRE(lc.consume_integer<int>() == 2);
     REQUIRE(lc.consume_list<std::tuple<int, int, std::string>>() == std::make_tuple(3, 4, "hi"s));
     REQUIRE(lc.consume_list<std::pair<std::string_view, std::string_view>>() ==
             std::make_pair("foo"sv, "bar"sv));
+    REQUIRE(lc.consume_list<std::array<int, 3>>() == std::array{1, 2, 3});
     REQUIRE(lc.consume_integer<int>() == -4);
 
     bt_dict_consumer dc{"d1:Ai0e1:ali1e3:omge1:bli1ei2ei3eee"};
@@ -270,7 +276,7 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
     lp += 42;
     CHECK(lp.view() == "l3:abci42ee");
     std::vector<int> randos = {{1, 17, -999}};
-    lp.append(randos.begin(), randos.end());
+    lp.extend(randos.begin(), randos.end());
     CHECK(lp.view() == "l3:abci42ei1ei17ei-999ee");
 
     {
@@ -289,12 +295,14 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
     }
 
     lp.append_list().append_list().append_list() += "omg"s;
-    CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeee");
+    lp.append(std::array<int, 0>{});
+    lp.append_list(std::array{1});
+    CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eee");
 
     {
         auto dict = lp.append_dict();
         CHECK(dict.view() == "de");
-        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeedee");
+        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eedee");
 
         CHECK_THROWS_AS(lp.append(1), std::logic_error);
 
@@ -302,13 +310,19 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
         dict.append("g", 42);
 
         CHECK(dict.view() == "d3:foo3:bar1:gi42ee");
-        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42eee");
+        CHECK(lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42eee");
 
         dict.append_list("h").append_dict().append_dict("a").append_list("A") += 999;
         CHECK(dict.view() == "d3:foo3:bar1:gi42e1:hld1:ad1:Ali999eeeeee");
         CHECK(lp.view() ==
-              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
               "Ali999eeeeeee");
+
+        dict.append("i", std::array{1, 2, 3});
+        dict.append_list("j", std::tuple<>{});
+        CHECK(lp.view() ==
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "Ali999eeeee1:ili1ei2ei3ee1:jleee");
     }
 
     if (external_buffer) {
@@ -318,8 +332,8 @@ TEST_CASE("bt streaming list producer", "[bt][list][producer]") {
         auto str = std::move(lp).str();
         CHECK(str.capacity() == orig_cap);
         CHECK(str ==
-              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:"
-              "Ali999eeeeeee");
+              "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeeleli1eed3:foo3:bar1:gi42e1:hld1:ad1:"
+              "Ali999eeeee1:ili1ei2ei3ee1:jleee");
 
         CHECK(lp.str_ref().capacity() < 32);  // SSO sizes vary across compilers
         CHECK(lp.view() == "le");
@@ -360,7 +374,7 @@ TEST_CASE("bt streaming dict producer", "[bt][dict][producer]") {
     CHECK(dp.view() == "d3:foo3:bar4:foo\0i-333222111e6:myListl0:i2ei42ee1:pd0:i1eee"sv);
 
     std::map<std::string, int> to_append{{"q", 1}, {"r", 2}, {"~", 3}, {"~1", 4}};
-    dp.append(to_append.begin(), to_append.end());
+    dp.extend(to_append.begin(), to_append.end());
 
     CHECK(dp.view() ==
           "d3:foo3:bar4:foo\0i-333222111e6:myListl0:i2ei42ee1:pd0:i1ee1:qi1e1:ri2e1:~i3e2:~1i4ee"sv);
@@ -487,7 +501,7 @@ TEST_CASE("bt_producer/bt_value combo", "[bt][dict][value][producer]") {
     CHECK(y.view() == "li123ed1:bi1e1:cd1:d1:e1:fli1ei2ei3eeeed1:a0:eld1:a0:ee1:~e");
 }
 
-TEST_CASE("Require integer/string methods", "[bt][dict][consumer][require]") {
+TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
     auto data = bt_serialize(
             bt_dict{{"A", 92},
                     {"C", 64},
@@ -495,11 +509,13 @@ TEST_CASE("Require integer/string methods", "[bt][dict][consumer][require]") {
                     {"G", "tomato sauce"},
                     {"I", 69},
                     {"K", 420},
+                    {"L", bt_list{1, 2, 3}},
                     {"M", bt_dict{{"Q", "Q"}}}});
 
     bt_dict_consumer btdp{data};
 
-    int a, c, i, k;
+    [[maybe_unused]] int a, c, i, k;
+    [[maybe_unused]] std::array l{1, 2, 3};
     std::string e, g;
     bt_dict bd;
 
@@ -524,7 +540,13 @@ TEST_CASE("Require integer/string methods", "[bt][dict][consumer][require]") {
         REQUIRE_NOTHROW(g = btdp.require<std::string>("G"));
         REQUIRE_NOTHROW(i = btdp.require<int>("I"));
         REQUIRE_NOTHROW(k = btdp.require<int>("K"));
+        btdp.skip_until("M");
         REQUIRE_NOTHROW(bd = btdp.consume<bt_dict>());
+    }
+
+    SECTION("Success cases - consuming array") {
+        REQUIRE_NOTHROW(l = btdp.require<std::array<int, 3>>("L"));
+        CHECK(l == std::array{1, 2, 3});
     }
 
     SECTION("Success cases - string conversion types") {
@@ -629,12 +651,12 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
 
     // Test with long keys for the sig field (figuring out the exact signing value is a little
     // complicated because of the integer in the key value; this is for testing that logic).
-    for (size_t len : {9, 10, 11, 99, 100, 101, 999, 1000, 9999, 10000}) {
+    for (auto len : {9, 10, 11, 99, 100, 101, 999, 1000, 9999, 10000}) {
         SECTION("sig key length " + std::to_string(len)) {
             bt_dict_producer dp2;
             dp2.append("a", 1);
-            std::string sig_key(len, 'x');
-            dp2.append_signature(sig_key, [](std::string_view to_sign) { return "sig"; });
+            std::string sig_key(static_cast<size_t>(len), 'x');
+            dp2.append_signature(sig_key, [](std::string_view) { return "sig"; });
             bt_dict_consumer dc2{dp2.view()};
             CHECK(dc2.next_integer<int>() == std::make_pair("a"sv, 1));
             auto [key, msg, sig] = dc2.next_signature();
@@ -657,7 +679,7 @@ TEST_CASE("bt trailing garbage detection", "[bt][deserialization][trailing-garba
     REQUIRE_NOTHROW(bt_deserialize("i456e", x));
     CHECK(x == 456);
     REQUIRE_THROWS(bt_deserialize("i789ewhoawhoawhooooaa", x));
-    CHECK(x == 789); // The integer still get sets, even though we throw
+    CHECK(x == 789);  // The integer still get sets, even though we throw
 
     bt_dict_consumer dc1{"d1:ai123ee🤔"};
     REQUIRE_THROWS(dc1.finish());

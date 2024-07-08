@@ -1,3 +1,10 @@
+oxen-encoding (1.1.0-2~deb11) bullseye; urgency=medium
+
+  * Disable -Werror for deb builds
+  * add missing header to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 08 Jul 2024 15:14:45 -0300
+
 oxen-encoding (1.1.0-1~deb11) bullseye; urgency=medium
 
   [ dr7ana ]

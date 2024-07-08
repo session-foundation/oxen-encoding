@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <charconv>
+#include <concepts>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -14,11 +15,10 @@
 #include "bt_serialize.h"
 #endif
 
+#include "common.h"
 #include "variant.h"
 
 namespace oxenc {
-
-using namespace std::literals;
 
 class bt_dict_producer;
 
@@ -30,8 +30,8 @@ class bt_dict_producer;
 /// space (for int types up to 64-bit); we return a pointer one past the last char written.
 template <typename IntType>
 char* apple_to_chars10(char* buf, IntType val) {
-    static_assert(std::is_integral_v<IntType> && sizeof(IntType) <= 8);
-    if constexpr (std::is_signed_v<IntType>) {
+    static_assert(std::integral<IntType> && sizeof(IntType) <= 8);
+    if constexpr (std::signed_integral<IntType>) {
         if (val < 0) {
             buf[0] = '-';
             return apple_to_chars10(buf + 1, static_cast<std::make_unsigned_t<IntType>>(-val));
@@ -57,13 +57,7 @@ char* apple_to_chars10(char* buf, IntType val) {
 
 namespace detail {
 
-    template <typename T>
-    constexpr bool is_string_view_compatible =
-            std::is_convertible_v<T, std::string_view> ||
-            std::is_convertible_v<T, std::basic_string_view<unsigned char>> ||
-            std::is_convertible_v<T, std::basic_string_view<std::byte>>;
-
-    template <typename Char, typename = std::enable_if_t<sizeof(Char) == 1>>
+    template <basic_char Char>
     std::string_view to_sv(const std::basic_string_view<Char>& x) {
         return {reinterpret_cast<const char*>(x.data()), x.size()};
     }
@@ -71,13 +65,13 @@ namespace detail {
     template <typename Class, typename SignFunc>
     auto append_signature_helper(Class& self, SignFunc sign) {
         using Char = std::conditional_t<
-                std::is_invocable_v<SignFunc, std::string_view&&>,
+                std::invocable<SignFunc, std::string_view&&>,
                 char,
                 std::conditional_t<
-                        std::is_invocable_v<SignFunc, std::basic_string_view<unsigned char>&&>,
+                        std::invocable<SignFunc, std::basic_string_view<unsigned char>&&>,
                         unsigned char,
                         std::conditional_t<
-                                std::is_invocable_v<SignFunc, std::basic_string_view<std::byte>&&>,
+                                std::invocable<SignFunc, std::basic_string_view<std::byte>&&>,
                                 std::byte,
                                 void>>>;
         static_assert(
@@ -87,8 +81,8 @@ namespace detail {
 
         auto result = sign(self.template view_for_signing<Char>());
         if constexpr (
-                std::is_same_v<decltype(result), char*> ||
-                std::is_same_v<decltype(result), const char*>)
+                std::same_as<decltype(result), char*> ||
+                std::same_as<decltype(result), const char*>)
             return std::string_view{result};
         else {
             static_assert(
@@ -179,9 +173,9 @@ class bt_list_producer {
 
     // Serializes an integer value and appends it to the output buffer.  Does not call
     // append_intermediate_ends().
-    template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
+    template <std::integral IntType>
     void append_impl(IntType val) {
-        if constexpr (std::is_same_v<IntType, bool>)
+        if constexpr (std::same_as<IntType, bool>)
             buffer_append(val ? "i1e"sv : "i0e"sv);
         else {
             char buf[22];  // 'i' + base10 representation + 'e'
@@ -229,7 +223,7 @@ class bt_list_producer {
     /// view includes the `e` list end serialization markers which will be overwritten if the list
     /// (or an active sublist/subdict) is appended to.  Can optionally return a basic_string_view of
     /// a char-like type other than char for convenience.
-    template <typename Char = char, std::enable_if_t<sizeof(Char) == 1, int> = 0>
+    template <basic_char Char = char>
     std::basic_string_view<Char> view() const {
         const char* x;
         if (auto* s = std::get_if<std::string>(&out))
@@ -306,7 +300,7 @@ class bt_list_producer {
     }
 
     /// Appends an element containing binary string data
-    template <typename T, std::enable_if_t<detail::is_string_view_compatible<T>, int> = 0>
+    template <string_view_compatible T>
     void append(const T& data) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -314,14 +308,14 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
-    template <typename T, std::enable_if_t<detail::is_string_view_compatible<T>, int> = 0>
+    template <string_view_compatible T>
     bt_list_producer& operator+=(const T& data) {
         append(data);
         return *this;
     }
 
     /// Appends an integer (including bools)
-    template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
+    template <std::integral IntType>
     void append(IntType i) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -329,21 +323,48 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
-    template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
+    template <std::integral IntType>
     bt_list_producer& operator+=(IntType i) {
         append(i);
         return *this;
     }
 
-    /// Appends elements from the range [from, to) to the list.  This does *not* append the elements
-    /// as a sublist: for that you should use something like: `l.append_list().append(from, to);`
+    /// Appends elements from the range [from, to) to the existing list (i.e. without creating a
+    /// sublist).
     template <typename ForwardIt>
-    void append(ForwardIt from, ForwardIt to) {
+    void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         while (from != to)
             append_impl(*from++);
         append_intermediate_ends();
+    }
+
+    /// Appends elements from the input container to the existing list (i.e. without creating a
+    /// sublist).
+    template <bt_input_list_container L>
+    void extend(const L& list) {
+        extend(list.begin(), list.end());
+    }
+
+    // Deprecated alias for `extend(...)`.  This does *not* append the elements as a sublist.
+    template <typename ForwardIt>
+    [[deprecated("Use extend instead")]] void append(ForwardIt from, ForwardIt to) {
+        extend(from, to);
+    }
+
+    /// Appends an input list container as a sublist.  Equivalenet to append_list(tuple).  Note that
+    /// this is not equivalent to the iterator pair overload above: that appends to the current
+    /// list, while this one creates a new sublist and appends the container elements to that.
+    template <bt_input_list_container L>
+    void append(const L& list) {
+        append_list(list);
+    }
+
+    /// Appends a tuple/pair/array as a sublist.  Equivalent to append_list(tuple).
+    template <tuple_like Tuple>
+    void append(const Tuple& tuple) {
+        append_list(tuple);
     }
 
     /// Appends an optional value: the value will be appended as if by calling `.append(*val)` if
@@ -371,6 +392,21 @@ class bt_list_producer {
     /// outlive the parent.
     bt_list_producer append_list();
 
+    template <typename ForwardIt>
+    void append_list(ForwardIt from, ForwardIt to) {
+        append_list().extend(from, to);
+    }
+
+    /// Appends a compatible input list container as a sublist
+    template <bt_input_list_container L>
+    void append_list(const L& input) {
+        append_list(input.begin(), input.end());
+    }
+
+    /// Appends a tuple/pair/array as a sublist
+    template <tuple_like Tuple>
+    void append_list(const Tuple& t);
+
     /// Appends a dict to this list.  Returns a new bt_dict_producer that references the parent
     /// list.  The parent cannot be added to until the subdict is destroyed.  This is meant to be
     /// used via RAII (see append_list() for details).
@@ -378,6 +414,12 @@ class bt_list_producer {
     /// If doing more complex lifetime management, take care not to allow the child instance to
     /// outlive the parent.
     bt_dict_producer append_dict();
+
+    /// There is no append_dict() taking a generic dict-like object because we can't ensure it
+    /// iterates in sorted order, and therefore we can't append it without copying into a sorted
+    /// container.
+    template <bt_input_dict_container D>
+    void append_dict(const D&) = delete;
 
     /// Appends a bt_value, bt_dict, or bt_list to this bt_list.  You must include the
     /// bt_value_producer.h header (either directly or via bt.h) to use this method.
@@ -409,7 +451,7 @@ class bt_list_producer {
     /// Caveat emptor: this can *absolutely* be a foot-shotgun.  The rest of this class is
     /// designed such that if it *does* give you an output bt-encoded string, it *will* be
     /// valid bt-encoding.  This method violates that property.
-    template <typename T, std::enable_if_t<detail::is_string_view_compatible<T>, int> = 0>
+    template <string_view_compatible T>
     void append_encoded(T encoded) {
 #ifndef NDEBUG
         // on debug build, throw if `encoded` is invalid bt-encoded data
@@ -507,10 +549,8 @@ class bt_dict_producer : bt_list_producer {
 
     /// Appends a key-value pair with a string or integer value.  The key must be > the last key
     /// added, but this is only enforced (with an assertion) in debug builds.
-    template <
-            typename T,
-            std::enable_if_t<detail::is_string_view_compatible<T> || std::is_integral_v<T>, int> =
-                    0>
+    template <typename T>
+    requires string_view_compatible<T> || std::integral<T>
     void append(std::string_view key, const T& value) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -518,6 +558,20 @@ class bt_dict_producer : bt_list_producer {
         append_impl(key);
         append_impl(value);
         append_intermediate_ends();
+    }
+
+    /// Appends an input list container as a sublist.  Equivalenet to append_list(tuple).  Note that
+    /// this is not equivalent to the iterator pair overload above: that appends to the current
+    /// list, while this one creates a new sublist and appends the container elements to that.
+    template <bt_input_list_container L>
+    void append(std::string_view key, const L& list) {
+        append_list(key, list);
+    }
+
+    /// Appends a tuple/pair/array as a sublist.  Equivalent to append_list(tuple).
+    template <tuple_like Tuple>
+    void append(std::string_view key, const Tuple& tuple) {
+        append_list(key, tuple);
     }
 
     /// Appends a key-value pair with an optional value, *if* the optional is set.  If the value is
@@ -531,26 +585,25 @@ class bt_dict_producer : bt_list_producer {
     /// Appends pairs from the range [from, to) to the dict.  Elements must have a .first
     /// convertible to a string_view, and a .second that is either string view convertible or an
     /// integer.  This does *not* append the elements as a subdict: for that you should use
-    /// something like: `l.append_dict().append(key, from, to);`
+    /// something like: `l.append_dict().extend(key, from, to);`
     ///
     /// Also note that the range *must* be sorted by keys, which means either using an ordered
     /// container (e.g. std::map) or a manually ordered container (such as a vector or list of
     /// pairs).  unordered_map, however, is not acceptable.
-    template <
-            typename ForwardIt,
-            std::enable_if_t<!detail::is_string_view_compatible<ForwardIt>, int> = 0>
-    void append(ForwardIt from, ForwardIt to) {
+    template <typename ForwardIt>
+    requires(!string_view_compatible<ForwardIt>)
+    void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         using KeyType = std::remove_cv_t<std::decay_t<decltype(from->first)>>;
         using ValType = std::decay_t<decltype(from->second)>;
-        static_assert(detail::is_string_view_compatible<decltype(from->first)>);
-        static_assert(detail::is_string_view_compatible<ValType> || std::is_integral_v<ValType>);
+        static_assert(string_view_compatible<decltype(from->first)>);
+        static_assert(string_view_compatible<ValType> || std::integral<ValType>);
         using BadUnorderedMap = std::unordered_map<KeyType, ValType>;
         static_assert(
                 !(  // Disallow unordered_map iterators because they are not going to be ordered.
-                        std::is_same_v<typename BadUnorderedMap::iterator, ForwardIt> ||
-                        std::is_same_v<typename BadUnorderedMap::const_iterator, ForwardIt>));
+                        std::same_as<typename BadUnorderedMap::iterator, ForwardIt> ||
+                        std::same_as<typename BadUnorderedMap::const_iterator, ForwardIt>));
         while (from != to) {
             const auto& [k, v] = *from++;
             check_incrementing_key(k);
@@ -558,6 +611,12 @@ class bt_dict_producer : bt_list_producer {
             append_impl(v);
         }
         append_intermediate_ends();
+    }
+
+    template <typename ForwardIt>
+    requires(!string_view_compatible<ForwardIt>)
+    [[deprecated("Use extend instead")]] void append(ForwardIt from, ForwardIt to) {
+        extend(from, to);
     }
 
     /// Appends a sub-dict value to this dict with the given key.  Returns a new bt_dict_producer
@@ -603,6 +662,24 @@ class bt_dict_producer : bt_list_producer {
         return bt_list_producer{this};
     }
 
+    /// Appends a list to this dict with the given key (which must be ascii-larger than the previous
+    /// key), and then appends the given iterator range to it.
+    template <typename ForwardIt>
+    void append_list(std::string_view key, ForwardIt from, ForwardIt to) {
+        append_list(key).extend(from, to);
+    }
+
+    /// Appends a list to this dict with the given key (which must be ascii-larger than the previous
+    /// key), and then appends all the element of the given input list compatible container to it.
+    template <bt_input_list_container L>
+    void append_list(std::string_view key, const L& list) {
+        append_list(key, list.begin(), list.end());
+    }
+
+    /// Appends a tuple/pair/array as a sublist with the given key.
+    template <tuple_like Tuple>
+    void append_list(std::string_view key, const Tuple& tuple);
+
     /// Appends a bt_value, bt_dict, or bt_list to this bt_dict.  You must include the
     /// bt_value_producer.h header (either directly or via bt.h) to use this method.
     template <typename T>
@@ -637,7 +714,7 @@ class bt_dict_producer : bt_list_producer {
     /// Caveat emptor: this can *absolutely* be a foot-shotgun.  The rest of this class is
     /// designed such that if it *does* give you an output bt-encoded string, it *will* be
     /// valid bt-encoding.  This method violates that property.
-    template <typename T, std::enable_if_t<detail::is_string_view_compatible<T>, int> = 0>
+    template <string_view_compatible T>
     void append_encoded(std::string_view key, T encoded) {
         check_incrementing_key(key);
         append_impl(key);
@@ -665,7 +742,7 @@ inline bt_list_producer::bt_list_producer(bt_list_producer&& other) :
         throw std::logic_error{"Cannot move bt_list/dict_producer with active sublists/subdicts"};
     var::visit(
             [](auto& x) {
-                if constexpr (!std::is_same_v<output&, decltype(x)>)
+                if constexpr (!std::same_as<output&, decltype(x)>)
                     x = nullptr;
             },
             other.data);
@@ -686,7 +763,7 @@ inline void bt_list_producer::buffer_append(std::string_view d) {
     } else {
         auto* bs = std::get_if<buf_span>(&out);
         assert(bs);
-        size_t avail = std::distance(bs->init + next, bs->end);
+        auto avail = static_cast<size_t>(std::distance(bs->init + next, bs->end));
         if (d.size() > avail)
             throw std::length_error{"Cannot write bt_producer: buffer size exceeded"};
         std::copy(d.begin(), d.end(), bs->init + next);
@@ -746,6 +823,25 @@ inline bt_dict_producer bt_list_producer::append_dict() {
     if (has_child)
         throw std::logic_error{"Cannot call append_dict while another nested list/dict is active"};
     return bt_dict_producer{this};
+}
+
+namespace detail {
+
+    template <tuple_like Tuple, size_t... Is>
+    inline void append_tuple(bt_list_producer l, const Tuple& t, std::index_sequence<Is...>) {
+        (l.append(std::get<Is>(t)), ...);
+    }
+
+}  // namespace detail
+
+template <tuple_like Tuple>
+void bt_list_producer::append_list(const Tuple& t) {
+    detail::append_tuple(append_list(), t, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+}
+
+template <tuple_like Tuple>
+void bt_dict_producer::append_list(std::string_view key, const Tuple& t) {
+    detail::append_tuple(append_list(key), t, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
 }
 
 }  // namespace oxenc

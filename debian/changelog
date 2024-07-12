@@ -1,3 +1,9 @@
+oxen-encoding (1.1.0-3~ubuntu2004) focal; urgency=medium
+
+  * add missing headers to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 12 Jul 2024 18:46:09 -0300
+
 oxen-encoding (1.1.0-2~ubuntu2004) focal; urgency=medium
 
   * Disable -Werror for deb builds

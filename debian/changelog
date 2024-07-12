@@ -1,3 +1,9 @@
+oxen-encoding (1.1.0-3~ubuntu2404) noble; urgency=medium
+
+  * add missing headers to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 12 Jul 2024 18:45:58 -0300
+
 oxen-encoding (1.1.0-2~ubuntu2404) noble; urgency=medium
 
   * Disable -Werror for deb builds

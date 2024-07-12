@@ -1,3 +1,10 @@
+oxen-encoding (1.1.0-3~deb13) trixie; urgency=medium
+
+  * add missing headers to install list
+  * add missing headers to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 12 Jul 2024 18:44:37 -0300
+
 oxen-encoding (1.1.0-2~deb13) trixie; urgency=medium
 
   * Disable -Werror for deb builds

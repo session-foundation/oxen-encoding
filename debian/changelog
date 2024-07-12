@@ -1,5 +1,11 @@
 oxen-encoding (1.1.0-2) sid; urgency=medium
 
+  * add missing headers to install list
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 12 Jul 2024 18:43:28 -0300
+
+oxen-encoding (1.1.0-2) sid; urgency=medium
+
   * Disable -Werror for deb builds
   * add missing header to install list
 

@@ -90,6 +90,7 @@ if(OXENC_INSTALL)
     oxenc/common.h
     oxenc/endian.h
     oxenc/hex.h
+    oxenc/rlp_serialize.h
     oxenc/variant.h
     ${CMAKE_CURRENT_BINARY_DIR}/oxenc/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenc

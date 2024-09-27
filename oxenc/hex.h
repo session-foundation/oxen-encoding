@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -288,8 +289,13 @@ namespace detail {
 
         Char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
         bool valid;
+
         constexpr std::basic_string_view<Char> view() const {
             return {decoded, valid ? sizeof(decoded) - 1 : 0};
+        }
+
+        constexpr std::span<Char> span() const {
+            return {const_cast<Char*>(decoded), valid ? sizeof(decoded) - 1 : 0};
         }
     };
     template <size_t N>
@@ -314,16 +320,31 @@ inline namespace literals {
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr std::basic_string_view<std::byte> operator""_hex_b() {
+    constexpr std::span<std::byte> operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return Hex.span();
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr std::basic_string_view<unsigned char> operator""_hex_u() {
+    constexpr std::span<unsigned char> operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return Hex.span();
     }
 }  // namespace literals
 
 }  // namespace oxenc
+
+namespace std {
+
+template <std::equality_comparable T, size_t N, oxenc::const_contiguous_range_t<T> R>
+bool operator==(std::span<T, N> lhs, const R& rhs) {
+    return std::ranges::equal(lhs, rhs);
+}
+
+template <std::three_way_comparable T, size_t N, oxenc::const_contiguous_range_t<T> R>
+auto operator<=>(std::span<T, N> lhs, const R& rhs) {
+    return std::lexicographical_compare_three_way(
+            lhs.begin(), lhs.end(), std::ranges::begin(rhs), std::ranges::end(rhs));
+}
+
+}  // namespace std

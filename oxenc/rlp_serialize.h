@@ -55,8 +55,8 @@ namespace detail {
     template <typename T>
     constexpr bool is_char_span<std::span<T>> = basic_char<std::remove_cv_t<T>>;
     template <typename T>
-    concept span_convertible =
-            !is_span<T> && std::convertible_to<const T&, std::span<const typename T::value_type>>;
+    concept span_convertible = !
+    is_span<T>&& std::convertible_to<const T&, std::span<const typename T::value_type>>;
 
     template <typename T>
     constexpr bool is_list = false;

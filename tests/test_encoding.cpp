@@ -12,14 +12,23 @@ const std::string pk_hex = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce7
 const std::string pk_b32z = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry";
 const std::string pk_b64 = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g=";
 
-constexpr auto pk_hex_constexpr = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce730f946e14b88"_hex;
+constexpr auto pk_hex_constexpr =
+        "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce730f946e14b88"_hex;
 constexpr auto pk_b32z_constexpr = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry"_b32z;
 constexpr auto pk_b64_constexpr = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g="_b64;
 
-const std::basic_string_view<std::byte> operator ""_bsv(const char* s, size_t n) {
+const std::span<std::byte> operator""_bsp(const char* s, size_t n) {
+    return {const_cast<std::byte*>(reinterpret_cast<const std::byte*>(s)), n};
+}
+
+const std::span<unsigned char> operator""_usp(const char* s, size_t n) {
+    return {const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(s)), n};
+}
+
+const std::basic_string_view<std::byte> operator""_bsv(const char* s, size_t n) {
     return {reinterpret_cast<const std::byte*>(s), n};
 }
-const std::basic_string_view<unsigned char> operator ""_usv(const char* s, size_t n) {
+const std::basic_string_view<unsigned char> operator""_usv(const char* s, size_t n) {
     return {reinterpret_cast<const unsigned char*>(s), n};
 }
 
@@ -35,8 +44,8 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE(oxenc::from_hex("12345678ffEDbca9") == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
     REQUIRE("12345678ffEDbca9"_hex == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
-    REQUIRE("12345678ffEDbca9"_hex_b == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_bsv);
-    REQUIRE("12345678ffEDbca9"_hex_u == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_usv);
+    REQUIRE("12345678ffEDbca9"_hex_b == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_bsp);
+    REQUIRE("12345678ffEDbca9"_hex_u == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_usp);
     // These should not compile:
     //"abc"_hex;
     //"abcg"_hex;

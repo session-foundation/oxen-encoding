@@ -34,8 +34,8 @@ inline constexpr bool big_endian = !little_endian;
 /// True if the type is integral and of a size we support swapping.  (We also allow size=1
 /// values to be passed here for completeness, though nothing is ever swapped for such a value).
 template <typename T>
-concept endian_swappable_integer =
-        std::integral<T> && (sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8);
+concept endian_swappable_integer = std::integral<T> && (sizeof(T) == 1 || sizeof(T) == 2 ||
+                                                        sizeof(T) == 4 || sizeof(T) == 8);
 
 /// Byte swaps an integer value unconditionally.  You usually want to use one of the other
 /// endian-aware functions rather than this.

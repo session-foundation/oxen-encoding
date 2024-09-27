@@ -3,7 +3,6 @@
 #include "common.h"
 
 using namespace std::literals;
-using namespace oxenc::literals;
 
 const std::string pk =
         "\xf1\x6b\xa5\x59\x10\x39\xf0\x89\xb4\x2a\x83\x41\x75\x09\x30\x94\x07\x4d\x0d\x93\x7a\x79"
@@ -16,14 +15,6 @@ constexpr auto pk_hex_constexpr =
         "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce730f946e14b88"_hex;
 constexpr auto pk_b32z_constexpr = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry"_b32z;
 constexpr auto pk_b64_constexpr = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g="_b64;
-
-const std::span<std::byte> operator""_bsp(const char* s, size_t n) {
-    return {const_cast<std::byte*>(reinterpret_cast<const std::byte*>(s)), n};
-}
-
-const std::span<unsigned char> operator""_usp(const char* s, size_t n) {
-    return {const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(s)), n};
-}
 
 const std::basic_string_view<std::byte> operator""_bsv(const char* s, size_t n) {
     return {reinterpret_cast<const std::byte*>(s), n};

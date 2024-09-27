@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <concepts>
 #include <iterator>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -58,4 +59,26 @@ concept const_contiguous_range_t =
 
 using namespace std::literals;
 
+template <class InputIterator1, class InputIterator2, class Cmp>
+constexpr auto lexi_three_way_compare(
+        InputIterator1 __first1,
+        InputIterator1 __last1,
+        InputIterator2 __first2,
+        InputIterator2 __last2,
+        Cmp __comp) -> decltype(__comp(*__first1, *__first2)) {
+#if defined(__clang__) && defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION < 170000)
+    size_t len1 = __last1 - __first1;
+    size_t len2 = __last2 - __first2;
+    size_t minLen = std::min(len1, len2);
+    for (size_t i = 0; i < minLen; ++i, ++__first1, ++__first2) {
+        auto __c = __comp(*__first1, *__first2);
+        if (__c != 0) {
+            return __c;
+        }
+    }
+    return len1 <=> len2;
+#else
+    return std::lexicographical_compare_three_way(__first1, __last1, __first2, __last2, __comp);
+#endif
+}
 }  // namespace oxenc

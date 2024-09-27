@@ -3,12 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
-#include <span>
 #include <string>
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -288,16 +287,14 @@ namespace detail {
         }
 
         Char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
+        using size = std::integral_constant<size_t, N / 2>;
         bool valid;
 
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - 1 : 0};
-        }
+        constexpr std::basic_string_view<Char> view() const { return {decoded, size::value}; }
 
-        constexpr std::span<Char> span() const {
-            return {const_cast<Char*>(decoded), valid ? sizeof(decoded) - 1 : 0};
-        }
+        constexpr const_span<const Char> span() const { return {decoded, size::value}; }
     };
+
     template <size_t N>
     struct c_hex_literal : hex_literal<char, N> {
         consteval c_hex_literal(const char (&h)[N]) : hex_literal<char, N>{h} {}
@@ -320,31 +317,16 @@ inline namespace literals {
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr std::span<std::byte> operator""_hex_b() {
+    constexpr bspan operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
         return Hex.span();
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr std::span<unsigned char> operator""_hex_u() {
+    constexpr uspan operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
         return Hex.span();
     }
 }  // namespace literals
 
 }  // namespace oxenc
-
-namespace std {
-
-template <std::equality_comparable T, size_t N, oxenc::const_contiguous_range_t<T> R>
-bool operator==(std::span<T, N> lhs, const R& rhs) {
-    return std::ranges::equal(lhs, rhs);
-}
-
-template <std::three_way_comparable T, size_t N, oxenc::const_contiguous_range_t<T> R>
-auto operator<=>(std::span<T, N> lhs, const R& rhs) {
-    return std::lexicographical_compare_three_way(
-            lhs.begin(), lhs.end(), std::ranges::begin(rhs), std::ranges::end(rhs));
-}
-
-}  // namespace std

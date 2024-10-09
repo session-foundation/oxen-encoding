@@ -19,6 +19,7 @@
 
 #include "bt_value.h"
 #include "common.h"
+#include "span.h"
 #include "variant.h"
 
 namespace oxenc {
@@ -183,6 +184,23 @@ namespace detail {
             std::string_view view;
             bt_deserialize<std::string_view>{}(s, view);
             val = {view.data(), view.size()};
+        }
+    };
+
+    /// const_span specialization
+    template <const_span_like T>
+    struct bt_serialize<T> {
+        void operator()(std::ostream& os, const T& val) {
+            bt_serialize<std::string_view>{}(os, detail::to_sv(val));
+        }
+    };
+
+    template <const_span_like T>
+    struct bt_deserialize<T> {
+        void operator()(std::string_view& s, T& val) {
+            std::string_view view;
+            bt_deserialize<std::string_view>{}(s, view);
+            val = {reinterpret_cast<const typename T::value_type*>(view.data()), view.size()};
         }
     };
 
@@ -639,8 +657,10 @@ namespace detail {
     T consume_impl(Consumer& c) {
         if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
-        else if constexpr (is_string_like<T>)
+        else if constexpr (string_like<T>)
             return T{c.template consume_string_view<typename T::value_type>()};
+        else if constexpr (const_span_like<T>)
+            return T{c.template consume_span<const typename T::value_type>()};
         else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
             return c.template consume_list<T>();
         else if constexpr (std::same_as<T, bt_dict> || bt_output_dict_container<T>)
@@ -729,6 +749,20 @@ class bt_list_consumer {
         detail::bt_deserialize<std::string_view>{}(next, result);
         data = next;
         return {reinterpret_cast<const Char*>(result.data()), result.size()};
+    }
+
+    template <typename Char = const char>
+    const_span<Char> consume_span() {
+        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
+        if (data.empty())
+            throw bt_deserialize_invalid{"expected a string, but reached end of data"};
+        else if (!is_string())
+            throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
+        std::string_view next{data};
+        const_span<Char> result;
+        detail::bt_deserialize<const_span<Char>>{}(next, result);
+        data = next;
+        return result;
     }
 
     /// Attempts to parse the next value as an integer (and advance just past it).  Throws if the
@@ -1007,6 +1041,19 @@ class bt_dict_consumer : private bt_list_consumer {
         return ret;
     }
 
+    /// Attempt to parse the next value as a string->span pair (and advance just past it).  Throws
+    /// if the next value is not a const_span
+    template <typename Char = const char>
+    std::pair<std::string_view, const_span<Char>> next_span() {
+        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
+        if (!is_string())
+            throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
+        std::pair<std::string_view, const_span<Char>> ret;
+        ret.second = bt_list_consumer::consume_span<Char>();
+        ret.first = flush_key();
+        return ret;
+    }
+
     /// Attempts to parse the next value as an string->integer pair (and advance just past it).
     /// Throws if the next value is not an integer.
     template <typename IntType>
@@ -1179,6 +1226,12 @@ class bt_dict_consumer : private bt_list_consumer {
     ///     if (d.skip_until("key"))
     ///         value = d.consume_string();
     ///
+
+    template <typename Char = const char>
+    auto consume_span() {
+        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
+        return next_span<Char>().second;
+    }
 
     template <basic_char Char = char>
     auto consume_string_view() {

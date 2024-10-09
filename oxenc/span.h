@@ -9,10 +9,18 @@ inline namespace types { inline namespace span {
 
     using cspan = const_span<const char>;
     using uspan = const_span<const unsigned char>;
-
-    // template <size_t N = std::dynamic_extent>
     using bspan = const_span<const std::byte>;
 }}  // namespace types::span
+
+template <typename T, typename U = T::value_type>
+concept const_span_like = basic_char<U> && std::same_as<const_span<const U>, T>;
+
+namespace detail {
+template <const_span_like T>
+std::string_view to_sv(const T& x) {
+    return {reinterpret_cast<const char*>(x.data()), x.size()};
+}
+}  // namespace detail
 
 inline namespace operators { inline namespace span {
     template <typename T, size_t N, const_contiguous_range_t<T> R>

@@ -36,19 +36,18 @@ concept tuple_like = requires { std::tuple_size<Tuple>::value; };
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.
 template <typename T, typename U = T::value_type>
-concept is_string_like = basic_char<U> &&
-                         (std::same_as<std::basic_string<U>, std::remove_cv_t<T>> ||
-                          std::same_as<std::basic_string_view<U>, std::remove_cv_t<T>>);
+concept string_like = basic_char<U> &&
+                      (std::same_as<std::basic_string<U>, std::remove_cv_t<T>> ||
+                       std::same_as<std::basic_string_view<U>, std::remove_cv_t<T>>);
 
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).
 template <typename T>
 concept bt_input_list_container = !
-is_string_like<T> && !tuple_like<T> && !bt_input_dict_container<T> &&
-        requires {
-            typename T::const_iterator;
-            typename T::value_type;
-        };
+string_like<T> && !tuple_like<T> && !bt_input_dict_container<T> && requires {
+                                                                       typename T::const_iterator;
+                                                                       typename T::value_type;
+                                                                   };
 
 template <typename R, typename T>
 concept const_contiguous_range_t =
@@ -59,24 +58,24 @@ using namespace std::literals;
 
 template <class InputIterator1, class InputIterator2, class Cmp>
 constexpr auto lexi_three_way_compare(
-        InputIterator1 __first1,
-        InputIterator1 __last1,
-        InputIterator2 __first2,
-        InputIterator2 __last2,
-        Cmp __comp) -> decltype(__comp(*__first1, *__first2)) {
+        InputIterator1 first1,
+        InputIterator1 last1,
+        InputIterator2 first2,
+        InputIterator2 last2,
+        Cmp comp) -> decltype(comp(*first1, *first2)) {
 #if defined(__clang__) && defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION < 170000)
-    size_t len1 = __last1 - __first1;
-    size_t len2 = __last2 - __first2;
+    size_t len1 = last1 - first1;
+    size_t len2 = last2 - first2;
     size_t minLen = std::min(len1, len2);
-    for (size_t i = 0; i < minLen; ++i, ++__first1, ++__first2) {
-        auto __c = __comp(*__first1, *__first2);
-        if (__c != 0) {
-            return __c;
+    for (size_t i = 0; i < minLen; ++i, ++first1, ++first2) {
+        auto c = comp(*first1, *first2);
+        if (c != 0) {
+            return c;
         }
     }
     return len1 <=> len2;
 #else
-    return std::lexicographical_compare_three_way(__first1, __last1, __first2, __last2, __comp);
+    return std::lexicographical_compare_three_way(first1, last1, first2, last2, comp);
 #endif
 }
 }  // namespace oxenc

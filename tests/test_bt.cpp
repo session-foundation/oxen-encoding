@@ -477,6 +477,60 @@ TEST_CASE("bt_consumer with non-char values", "[bt][dict][consumer][char]") {
     CHECK(oxenc::bt_list_consumer{"ldee"}.consume_dict_data<std::byte>() == de_b);
 }
 
+TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer][consumer]") {
+    auto char_sp =
+            "on some tuesdays i prefer to have my afternoon tea au naturale in the foyer"_csp;
+    auto uchar_sp =
+            "however, my recurring nightmares w/r/t the neighbor's cat prevent full immersion"_usp;
+    auto bchar_sp =
+            "yet still i absolutely persist, not just because it is right, but because i must!"_bsp;
+
+    std::string buf;
+
+    {
+        bt_dict_producer btdp;
+        btdp.append("a", char_sp);
+
+        {
+            auto btlp = btdp.append_list("b");
+
+            btlp.append(bchar_sp);
+            btlp.append(uchar_sp);
+            btlp.append(char_sp);
+        }
+
+        btdp.append("c", uchar_sp);
+        btdp.append("d", bchar_sp);
+        buf = std::move(btdp).str();
+    }
+
+    CHECK(buf ==
+          "d1:a75:on some tuesdays i prefer to have my afternoon tea au naturale in the "
+          "foyer1:bl81:yet still i absolutely persist, not just because it is right, but because i "
+          "must!80:however, my recurring nightmares w/r/t the neighbor's cat prevent full "
+          "immersion75:on some tuesdays i prefer to have my afternoon tea au naturale in the "
+          "foyere1:c80:however, my recurring nightmares w/r/t the neighbor's cat prevent full "
+          "immersion1:d81:yet still i absolutely persist, not just because it is right, but "
+          "because i must!e");
+
+    bt_dict_consumer btdc{buf};
+
+    CHECK(btdc.next_span<const char>().second == char_sp);
+
+    {
+        auto sublist = btdc.consume_list_consumer();
+
+        CHECK(bchar_sp == sublist.consume_span<const std::byte>());
+        CHECK(uchar_sp == sublist.consume_span<const unsigned char>());
+        CHECK(char_sp == sublist.consume_span<const char>());
+
+        CHECK(sublist.is_finished());
+    }
+
+    CHECK(uchar_sp == btdc.require<uspan>("c"));
+    CHECK(bchar_sp == btdc.require<bspan>("d"));
+}
+
 TEST_CASE("bt_producer/bt_value combo", "[bt][dict][value][producer]") {
 
     bt_dict_producer x;

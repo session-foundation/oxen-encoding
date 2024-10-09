@@ -35,12 +35,10 @@ concept tuple_like = requires { std::tuple_size<Tuple>::value; };
 
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.
-template <typename T>
-constexpr bool is_string_like = false;
-template <typename Char>
-inline constexpr bool is_string_like<std::basic_string<Char>> = sizeof(Char) == 1;
-template <typename Char>
-inline constexpr bool is_string_like<std::basic_string_view<Char>> = sizeof(Char) == 1;
+template <typename T, typename U = T::value_type>
+concept is_string_like = basic_char<U> &&
+                         (std::same_as<std::basic_string<U>, std::remove_cv_t<T>> ||
+                          std::same_as<std::basic_string_view<U>, std::remove_cv_t<T>>);
 
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).

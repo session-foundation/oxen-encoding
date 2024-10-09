@@ -912,6 +912,8 @@ class bt_list_consumer {
         if (data.size() != 1)
             throw bt_deserialize_invalid{"Dict finished without consuming the entire buffer"};
     }
+
+    using value_type = bt_value;
 };
 
 /// Class that allows you to walk through key-value pairs of a bt-encoded dict in memory without
@@ -1328,6 +1330,8 @@ class bt_dict_consumer : private bt_list_consumer {
         if (data.size() != 1)
             throw bt_deserialize_invalid{"Dict finished without consuming the entire buffer"};
     }
+
+    using value_type = bt_value;
 };
 
 inline bt_dict_consumer bt_list_consumer::consume_dict_consumer() {

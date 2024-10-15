@@ -16,17 +16,17 @@ concept string_view_compatible = std::convertible_to<T, std::string_view> ||
                                  std::convertible_to<T, std::basic_string_view<std::byte>>;
 
 template <typename Char>
-concept basic_char = sizeof(Char) == 1 && !
-std::same_as<std::remove_cv_t<Char>, bool> &&
-        (std::integral<Char> || std::same_as<std::remove_cv_t<Char>, std::byte>);
+concept basic_char = sizeof(Char) == 1 && !std::same_as<std::remove_cv_t<Char>, bool> &&
+                     (std::integral<Char> || std::same_as<std::remove_cv_t<Char>, std::byte>);
 
 /// Partial dict validity; we don't check the second type for serializability, that will be
 /// handled via the base case static_assert if invalid.
 template <typename T>
 concept bt_input_dict_container =
         (std::same_as<std::string, std::remove_cv_t<typename T::value_type::first_type>> ||
-         std::same_as<std::string_view, std::remove_cv_t<typename T::value_type::first_type>>) &&
-        requires {
+         std::same_as<
+                 std::string_view,
+                 std::remove_cv_t<typename T::value_type::first_type>>)&&requires {
             typename T::const_iterator;           // is const iterable
             typename T::value_type::second_type;  // has a second type
         };
@@ -47,11 +47,11 @@ concept string_like = std::same_as<std::basic_string<char>, U> ||
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).
 template <typename T>
-concept bt_input_list_container = !
-string_like<T> && !tuple_like<T> && !bt_input_dict_container<T> && requires {
-                                                                       typename T::const_iterator;
-                                                                       typename T::value_type;
-                                                                   };
+concept bt_input_list_container =
+        !string_like<T> && !tuple_like<T> && !bt_input_dict_container<T> && requires {
+            typename T::const_iterator;
+            typename T::value_type;
+        };
 
 template <typename R, typename T>
 concept const_contiguous_range_t =

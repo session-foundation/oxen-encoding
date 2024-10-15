@@ -294,8 +294,8 @@ namespace detail {
     };
 
     template <typename T>
-    concept bt_output_list_container = !
-    std::same_as<T, std::string> && !bt_output_dict_container<T> && bt_insertable<T>;
+    concept bt_output_list_container =
+            !std::same_as<T, std::string> && !bt_output_dict_container<T> && bt_insertable<T>;
 
     // Sanity checks:
     static_assert(bt_input_list_container<bt_list>);

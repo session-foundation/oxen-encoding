@@ -34,15 +34,19 @@ concept bt_input_dict_container =
 template <typename Tuple>
 concept tuple_like = requires { std::tuple_size<Tuple>::value; };
 
+namespace detail {
+    template <typename T>
+    inline constexpr bool string_type = false;
+    template <basic_char T>
+    inline constexpr bool string_type<std::basic_string<T>> = true;
+    template <basic_char T>
+    inline constexpr bool string_type<std::basic_string_view<T>> = true;
+}  // namespace detail
+
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.
 template <typename T, typename U = std::remove_cv_t<T>>
-concept string_like = std::same_as<std::basic_string<char>, U> ||
-                      std::same_as<std::basic_string<unsigned char>, U> ||
-                      std::same_as<std::basic_string<std::byte>, U> ||
-                      std::same_as<std::basic_string_view<char>, U> ||
-                      std::same_as<std::basic_string_view<unsigned char>, U> ||
-                      std::same_as<std::basic_string_view<std::byte>, U>;
+concept string_like = detail::string_type<U>;
 
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).

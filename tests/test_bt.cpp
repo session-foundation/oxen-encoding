@@ -515,14 +515,14 @@ TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer
 
     bt_dict_consumer btdc{buf};
 
-    CHECK(btdc.next_span<const char>().second == char_sp);
+    CHECK(btdc.next_span<char>().second == char_sp);
 
     {
         auto sublist = btdc.consume_list_consumer();
 
-        CHECK(bchar_sp == sublist.consume_span<const std::byte>());
-        CHECK(uchar_sp == sublist.consume_span<const unsigned char>());
-        CHECK(char_sp == sublist.consume_span<const char>());
+        CHECK(bchar_sp == sublist.consume_span<std::byte>());
+        CHECK(uchar_sp == sublist.consume_span<unsigned char>());
+        CHECK(char_sp == sublist.consume_span<char>());
 
         CHECK(sublist.is_finished());
     }

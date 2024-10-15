@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -336,11 +336,12 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[from_base32z_size(N - 1) + 1];  // Includes a null byte so that view().data()
-        bool valid;                                  //   is a valid c string
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - 1 : 0};
-        }
+        static inline constexpr size_t size{from_base32z_size(N - 1)};
+        Char decoded[size + 1];
+
+        bool valid;
+
+        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
     template <size_t N>
     struct c_b32z_literal : b32z_literal<char, N> {
@@ -358,21 +359,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b32z_literal Base32z>
-    constexpr std::string_view operator""_b32z() {
+    constexpr auto operator""_b32z() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 
     template <detail::b_b32z_literal Base32z>
-    constexpr std::basic_string_view<std::byte> operator""_b32z_b() {
+    constexpr auto operator""_b32z_b() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 
     template <detail::u_b32z_literal Base32z>
-    constexpr std::basic_string_view<unsigned char> operator""_b32z_u() {
+    constexpr auto operator""_b32z_u() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 }  // namespace literals
 

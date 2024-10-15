@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -411,11 +411,12 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[from_base64_size(N - 1) + 1];
+        static inline constexpr size_t size{from_base64_size(N - 1) + 1};
+        Char decoded[size];
+
         uint8_t valid;  // 0 == invalid, otherwise the number of trailing null bytes (1-3)
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - valid : 0};
-        }
+
+        constexpr const_span<const Char> span() const { return {decoded, size - valid}; }
     };
     template <size_t N>
     struct c_b64_literal : b64_literal<char, N> {
@@ -433,21 +434,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b64_literal Base64>
-    constexpr std::string_view operator""_b64() {
+    constexpr auto operator""_b64() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 
     template <detail::b_b64_literal Base64>
-    constexpr std::basic_string_view<std::byte> operator""_b64_b() {
+    constexpr auto operator""_b64_b() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 
     template <detail::u_b64_literal Base64>
-    constexpr std::basic_string_view<unsigned char> operator""_b64_u() {
+    constexpr auto operator""_b64_u() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 }  // namespace literals
 

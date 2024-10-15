@@ -286,13 +286,11 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
-        using size = std::integral_constant<size_t, N / 2>;
+        static inline constexpr size_t size{N / 2};
+        Char decoded[size + 1];  // Includes a null byte so that span().data() is a valid c string
         bool valid;
 
-        constexpr std::basic_string_view<Char> view() const { return {decoded, size::value}; }
-
-        constexpr const_span<const Char> span() const { return {decoded, size::value}; }
+        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
 
     template <size_t N>
@@ -313,7 +311,7 @@ inline namespace literals {
     template <detail::c_hex_literal Hex>
     constexpr std::string_view operator""_hex() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return {Hex.decoded, Hex.size};
     }
 
     template <detail::b_hex_literal Hex>

@@ -751,16 +751,15 @@ class bt_list_consumer {
         return {reinterpret_cast<const Char*>(result.data()), result.size()};
     }
 
-    template <typename Char = const char>
-    const_span<Char> consume_span() {
-        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
+    template <basic_char Char = char>
+    const_span<const Char> consume_span() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
         else if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
         std::string_view next{data};
-        const_span<Char> result;
-        detail::bt_deserialize<const_span<Char>>{}(next, result);
+        const_span<const Char> result;
+        detail::bt_deserialize<const_span<const Char>>{}(next, result);
         data = next;
         return result;
     }
@@ -946,8 +945,6 @@ class bt_list_consumer {
         if (data.size() != 1)
             throw bt_deserialize_invalid{"Dict finished without consuming the entire buffer"};
     }
-
-    using value_type = bt_value;
 };
 
 /// Class that allows you to walk through key-value pairs of a bt-encoded dict in memory without
@@ -1043,13 +1040,12 @@ class bt_dict_consumer : private bt_list_consumer {
 
     /// Attempt to parse the next value as a string->span pair (and advance just past it).  Throws
     /// if the next value is not a const_span
-    template <typename Char = const char>
-    std::pair<std::string_view, const_span<Char>> next_span() {
-        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
+    template <typename Char = char>
+    std::pair<std::string_view, const_span<const Char>> next_span() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-        std::pair<std::string_view, const_span<Char>> ret;
-        ret.second = bt_list_consumer::consume_span<Char>();
+        std::pair<std::string_view, const_span<const Char>> ret;
+        ret.second = bt_list_consumer::consume_span<const Char>();
         ret.first = flush_key();
         return ret;
     }
@@ -1227,10 +1223,9 @@ class bt_dict_consumer : private bt_list_consumer {
     ///         value = d.consume_string();
     ///
 
-    template <typename Char = const char>
+    template <typename Char = char>
     auto consume_span() {
-        static_assert(std::is_const_v<Char>, "Span type must be const-qualifified!");
-        return next_span<Char>().second;
+        return next_span<const Char>().second;
     }
 
     template <basic_char Char = char>
@@ -1383,8 +1378,6 @@ class bt_dict_consumer : private bt_list_consumer {
         if (data.size() != 1)
             throw bt_deserialize_invalid{"Dict finished without consuming the entire buffer"};
     }
-
-    using value_type = bt_value;
 };
 
 inline bt_dict_consumer bt_list_consumer::consume_dict_consumer() {

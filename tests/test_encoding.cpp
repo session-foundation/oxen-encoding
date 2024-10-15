@@ -112,11 +112,11 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
             "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
 
     REQUIRE("yrtwk3hjixg66yjdeiuauk6p7hy1gtm8tgih55abrpnsxnpm3zzo"_b32z ==
-            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
+            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"_csp);
     REQUIRE("YRTWK3HJIXG66YJDEIUAUK6P7HY1GTM8TGIH55ABRPNSXNPM3ZZO"_b32z ==
-            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
-    REQUIRE("pb1sa5dx"_b32z_b == "hello"_bsv);
-    REQUIRE("pb1sa5dx"_b32z_u == "hello"_usv);
+            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"_csp);
+    REQUIRE("pb1sa5dx"_b32z_b == "hello"_bsp);
+    REQUIRE("pb1sa5dx"_b32z_u == "hello"_usp);
     // None of these should compile:
     // "abcl"_b32z;  // invalid character l
     // "abc"_b32z;  // invalid length (b32 string length % 8 cannot be 1, 3, or 6)
@@ -296,10 +296,10 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
             "continued and indefatigable generation of knowledge, exceeds the short vehemence of "
             "any carnal pleasure.");
 
-    REQUIRE("SGVsbG8="_b64 == "Hello");
-    REQUIRE("SGVsbG8"_b64 == "Hello");
-    REQUIRE("SGVsbG8"_b64_b == "Hello"_bsv);
-    REQUIRE("SGVsbG8"_b64_u == "Hello"_usv);
+    REQUIRE("SGVsbG8="_b64 == "Hello"_csp);
+    REQUIRE("SGVsbG8"_b64 == "Hello"_csp);
+    REQUIRE("SGVsbG8"_b64_b == "Hello"_bsp);
+    REQUIRE("SGVsbG8"_b64_u == "Hello"_usp);
     // None of these should compile:
     // "SGVsbG8$"_b64;
     // "ABCDE==="_b64;

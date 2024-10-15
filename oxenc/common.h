@@ -17,7 +17,8 @@ concept string_view_compatible = std::convertible_to<T, std::string_view> ||
 
 template <typename Char>
 concept basic_char = sizeof(Char) == 1 && !
-std::same_as<Char, bool> && (std::integral<Char> || std::same_as<Char, std::byte>);
+std::same_as<std::remove_cv_t<Char>, bool> &&
+        (std::integral<Char> || std::same_as<std::remove_cv_t<Char>, std::byte>);
 
 /// Partial dict validity; we don't check the second type for serializability, that will be
 /// handled via the base case static_assert if invalid.
@@ -35,10 +36,13 @@ concept tuple_like = requires { std::tuple_size<Tuple>::value; };
 
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.
-template <typename T, typename U = T::value_type>
-concept string_like = basic_char<U> &&
-                      (std::same_as<std::basic_string<U>, std::remove_cv_t<T>> ||
-                       std::same_as<std::basic_string_view<U>, std::remove_cv_t<T>>);
+template <typename T, typename U = std::remove_cv_t<T>>
+concept string_like = std::same_as<std::basic_string<char>, U> ||
+                      std::same_as<std::basic_string<unsigned char>, U> ||
+                      std::same_as<std::basic_string<std::byte>, U> ||
+                      std::same_as<std::basic_string_view<char>, U> ||
+                      std::same_as<std::basic_string_view<unsigned char>, U> ||
+                      std::same_as<std::basic_string_view<std::byte>, U>;
 
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).
@@ -56,14 +60,16 @@ concept const_contiguous_range_t =
 
 using namespace std::literals;
 
+#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION >= 170000
+using std::lexicographical_compare_three_way;
+#else
 template <class InputIterator1, class InputIterator2, class Cmp>
-constexpr auto lexi_three_way_compare(
+constexpr auto lexicographical_compare_three_way(
         InputIterator1 first1,
         InputIterator1 last1,
         InputIterator2 first2,
         InputIterator2 last2,
         Cmp comp) -> decltype(comp(*first1, *first2)) {
-#if defined(__clang__) && defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION < 170000)
     size_t len1 = last1 - first1;
     size_t len2 = last2 - first2;
     size_t minLen = std::min(len1, len2);
@@ -74,8 +80,7 @@ constexpr auto lexi_three_way_compare(
         }
     }
     return len1 <=> len2;
-#else
-    return std::lexicographical_compare_three_way(first1, last1, first2, last2, comp);
-#endif
 }
+#endif
+
 }  // namespace oxenc

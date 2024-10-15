@@ -4,7 +4,7 @@
 namespace oxenc {
 inline namespace types { inline namespace span {
     template <typename T, size_t N = std::dynamic_extent>
-    requires std::is_const_v<T> && std::equality_comparable<T>
+    requires std::is_const_v<T>
     using const_span = std::span<T, N>;
 
     using cspan = const_span<const char>;
@@ -12,25 +12,26 @@ inline namespace types { inline namespace span {
     using bspan = const_span<const std::byte>;
 }}  // namespace types::span
 
-template <typename T, typename U = T::value_type>
-concept const_span_like = basic_char<U> && std::same_as<const_span<const U>, T>;
+template <typename T, typename U = std::remove_cv_t<T>>
+concept const_span_like =
+        std::same_as<U, cspan> || std::same_as<U, uspan> || std::same_as<U, bspan>;
 
 namespace detail {
-template <const_span_like T>
-std::string_view to_sv(const T& x) {
+template <basic_char T>
+std::string_view to_sv(const std::span<T>& x) {
     return {reinterpret_cast<const char*>(x.data()), x.size()};
 }
 }  // namespace detail
 
 inline namespace operators { inline namespace span {
-    template <typename T, size_t N, const_contiguous_range_t<T> R>
+    template <std::equality_comparable T, size_t N, const_contiguous_range_t<T> R>
     inline bool operator==(const std::span<T, N>& lhs, const R& rhs) {
         return std::ranges::equal(lhs, rhs);
     }
 
-    template <typename T, size_t N, const_contiguous_range_t<T> R>
+    template <std::three_way_comparable T, size_t N, const_contiguous_range_t<T> R>
     inline auto operator<=>(const std::span<T, N>& lhs, const R& rhs) {
-        return lexi_three_way_compare(
+        return lexicographical_compare_three_way(
                 lhs.begin(), lhs.end(), std::ranges::begin(rhs), std::ranges::end(rhs));
     }
 }}  // namespace operators::span
@@ -43,10 +44,10 @@ struct literal {
             arr[i] = static_cast<T>(s[i]);
     }
 
+    inline static constexpr size_t size{N - 1};
     T arr[N];
-    using size = std::integral_constant<size_t, N - 1>;
 
-    constexpr const_span<const T> span() const { return {arr, size::value}; }
+    constexpr const_span<const T> span() const { return {arr, size}; }
 };
 
 template <size_t N>

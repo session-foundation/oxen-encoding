@@ -198,8 +198,8 @@ class bt_list_producer {
     void append_impl(std::basic_string_view<unsigned char> s) { append_impl(detail::to_sv(s)); }
     void append_impl(std::basic_string_view<std::byte> s) { append_impl(detail::to_sv(s)); }
 
-    template <const_span_like T>
-    void append_impl(T s) {
+    template <basic_char T>
+    void append_impl(std::span<T> s) {
         append_impl(detail::to_sv(s));
     }
 
@@ -315,8 +315,8 @@ class bt_list_producer {
     }
 
     /// Appends an element containing const_span data
-    template <const_span_like T>
-    void append(const T& data) {
+    template <basic_char T>
+    void append(const std::span<T>& data) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         append_impl(data);
@@ -577,8 +577,8 @@ class bt_dict_producer : bt_list_producer {
 
     /// Appends a key-value pair with a const_span value.  The key must be > the last key added,
     /// but this is only enforced (with an assertion) in debug builds.
-    template <const_span_like T>
-    void append(std::string_view key, const T& value) {
+    template <basic_char T>
+    void append(std::string_view key, const std::span<T>& value) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         check_incrementing_key(key);

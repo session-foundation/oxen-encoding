@@ -96,6 +96,8 @@ local macos_pipeline(name, arch, build_type) = {
   debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug'),
   clang(16),
   full_llvm(16),
+  clang(19),
+  full_llvm(19),
   debian_pipeline('Debian bullseye (amd64)', docker_base + 'debian-bullseye'),
   debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64'),

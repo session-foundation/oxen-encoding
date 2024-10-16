@@ -4,17 +4,23 @@
 namespace oxenc {
 inline namespace types { inline namespace span {
     template <typename T, size_t N = std::dynamic_extent>
-    requires std::is_const_v<T>
-    using const_span = std::span<T, N>;
-
-    using cspan = const_span<const char>;
-    using uspan = const_span<const unsigned char>;
-    using bspan = const_span<const std::byte>;
+    using const_span = std::span<const T, N>;
 }}  // namespace types::span
 
+namespace detail {
+template <typename T>
+inline constexpr bool const_span_type = false;
+template <basic_char T>
+inline constexpr bool const_span_type<const_span<T>> = true;
+}  // namespace detail
+
 template <typename T, typename U = std::remove_cv_t<T>>
-concept const_span_like =
-        std::same_as<U, cspan> || std::same_as<U, uspan> || std::same_as<U, bspan>;
+concept const_span_like = detail::const_span_type<U>;
+
+template <typename T>
+concept char_span_convertible = std::convertible_to<T, std::span<char>> ||
+                                std::convertible_to<T, std::span<unsigned char>> ||
+                                std::convertible_to<T, std::span<std::byte>>;
 
 namespace detail {
 template <basic_char T>
@@ -66,17 +72,17 @@ struct usp_literal : literal<unsigned char, N> {
 
 inline namespace literals { inline namespace span {
     template <detail::sp_literal CStr>
-    constexpr cspan operator""_csp() {
+    constexpr auto operator""_csp() {
         return CStr.span();
     }
 
     template <detail::usp_literal UStr>
-    constexpr uspan operator""_usp() {
+    constexpr auto operator""_usp() {
         return UStr.span();
     }
 
     template <detail::bsp_literal BStr>
-    constexpr bspan operator""_bsp() {
+    constexpr auto operator""_bsp() {
         return BStr.span();
     }
 }}  // namespace literals::span

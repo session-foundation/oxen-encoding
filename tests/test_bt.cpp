@@ -527,8 +527,8 @@ TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer
         CHECK(sublist.is_finished());
     }
 
-    CHECK(uchar_sp == btdc.require<uspan>("c"));
-    CHECK(bchar_sp == btdc.require<bspan>("d"));
+    CHECK(uchar_sp == btdc.require<const_span<unsigned char>>("c"));
+    CHECK(bchar_sp == btdc.require<const_span<std::byte>>("d"));
 }
 
 TEST_CASE("bt_producer/bt_value combo", "[bt][dict][value][producer]") {

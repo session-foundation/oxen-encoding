@@ -315,13 +315,13 @@ inline namespace literals {
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr bspan operator""_hex_b() {
+    constexpr auto operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
         return Hex.span();
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr uspan operator""_hex_u() {
+    constexpr auto operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
         return Hex.span();
     }

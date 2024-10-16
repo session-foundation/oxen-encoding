@@ -148,6 +148,9 @@ class bt_list_producer {
     // Does the actual appending to the buffer, and throwing if we'd overrun.
     void buffer_append(std::string_view d);
 
+    // Appends to buffer, throws on overrun/
+    void buffer_append(const char* data, size_t size);
+
     // Appends the 'e's into the buffer to close off open sublists/dicts *without* advancing the
     // buffer position; we do this after each append so that the buffer always contains valid
     // encoded data, even while we are still appending to it, and so that appending something raises
@@ -187,20 +190,29 @@ class bt_list_producer {
         }
     }
 
-    // Appends a string value, but does not call append_intermediate_ends()
-    void append_impl(std::string_view s) {
+    // Appends string values, but does not call append_intermediate_ends()
+    void append_impl(const char* data, size_t size) {
         char buf[21];  // length + ':'
-        auto* ptr = write_integer(s.size(), buf);
+        auto* ptr = write_integer(size, buf);
         *ptr++ = ':';
-        buffer_append({buf, static_cast<size_t>(ptr - buf)});
-        buffer_append(s);
+        buffer_append(buf, static_cast<size_t>(ptr - buf));
+        buffer_append(data, size);
     }
-    void append_impl(std::basic_string_view<unsigned char> s) { append_impl(detail::to_sv(s)); }
-    void append_impl(std::basic_string_view<std::byte> s) { append_impl(detail::to_sv(s)); }
+
+    // Appends a string value, but does not call append_intermediate_ends()
+    void append_impl(std::string_view s) { append_impl(s.data(), s.size()); }
+
+    void append_impl(const unsigned char* data, size_t size) {
+        append_impl(reinterpret_cast<const char*>(data), size);
+    }
+
+    void append_impl(const std::byte* data, size_t size) {
+        append_impl(reinterpret_cast<const char*>(data), size);
+    }
 
     template <basic_char T>
     void append_impl(std::span<T> s) {
-        append_impl(detail::to_sv(s));
+        append_impl(reinterpret_cast<const char*>(s.data()), s.size());
     }
 
   public:
@@ -310,7 +322,16 @@ class bt_list_producer {
     void append(const T& data) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
-        append_impl(data);
+        append_impl(data.data(), data.size());
+        append_intermediate_ends();
+    }
+
+    /// Appends an element containing a const Char string
+    template <basic_char T, size_t N>
+    void append(const T (&s)[N]) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to list when a sublist is active"};
+        append_impl(s, N - 1);
         append_intermediate_ends();
     }
 
@@ -781,6 +802,22 @@ inline bt_list_producer* bt_list_producer::parent() {
     if (auto* parent = std::get_if<bt_dict_producer*>(&data))
         return static_cast<bt_list_producer*>(*parent);
     return nullptr;
+}
+
+inline void bt_list_producer::buffer_append(const char* data, size_t size) {
+    if (auto* s = std::get_if<std::string>(&out)) {
+        s->resize(next);  // Truncate any trailing e's
+        s->append(data, size);
+    } else {
+        auto* bs = std::get_if<buf_span>(&out);
+        assert(bs);
+        auto avail = static_cast<size_t>(std::distance(bs->init + next, bs->end));
+        if (size > avail)
+            throw std::length_error{"Cannot write bt_producer: buffer size exceeded"};
+        std::copy(data, data + size, bs->init + next);
+    }
+    for (auto* p = this; p; p = p->parent())
+        p->next += size;
 }
 
 inline void bt_list_producer::buffer_append(std::string_view d) {

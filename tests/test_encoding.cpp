@@ -16,13 +16,6 @@ constexpr auto pk_hex_constexpr =
 constexpr auto pk_b32z_constexpr = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry"_b32z;
 constexpr auto pk_b64_constexpr = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g="_b64;
 
-const std::basic_string_view<std::byte> operator""_bsv(const char* s, size_t n) {
-    return {reinterpret_cast<const std::byte*>(s), n};
-}
-const std::basic_string_view<unsigned char> operator""_usv(const char* s, size_t n) {
-    return {reinterpret_cast<const unsigned char*>(s), n};
-}
-
 TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     REQUIRE(oxenc::to_hex("\xff\x42\x12\x34") == "ff421234"s);
     std::vector<uint8_t> chars{{1, 10, 100, 254}};
@@ -61,7 +54,7 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     std::vector<std::byte> bytes{
             {std::byte{0xff}, std::byte{0x42}, std::byte{0x12}, std::byte{0x34}}};
-    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    const_span<std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_hex(b) == "ff421234"s);
 
     // In-place decoding and truncation via to_hex's returned iterator:
@@ -84,7 +77,7 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     bytes[5] = std::byte{'2'};
     bytes[6] = std::byte{'3'};
     bytes[7] = std::byte{'4'};
-    std::basic_string_view<std::byte> hex_bytes{bytes.data(), bytes.size()};
+    const_span<std::byte> hex_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_hex(hex_bytes));
     REQUIRE(oxenc::from_hex(hex_bytes) == "\xff\x42\x12\x34");
 
@@ -173,7 +166,7 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE(hellob32z == "jb1sa5dx!");
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
-    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    const_span<std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_base32z(b) == "yd9o");
 
     bytes.resize(4);
@@ -181,7 +174,7 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     bytes[1] = std::byte{'d'};
     bytes[2] = std::byte{'9'};
     bytes[3] = std::byte{'o'};
-    std::basic_string_view<std::byte> b32_bytes{bytes.data(), bytes.size()};
+    const_span<std::byte> b32_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_base32z(b32_bytes));
     REQUIRE(oxenc::from_base32z(b32_bytes) == "\x00\xff"sv);
 
@@ -330,7 +323,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE(hellob64 == "SGVsbG8=!");
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
-    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    const_span<std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_base64(b) == "AP8=");
 
     bytes.resize(4);
@@ -338,7 +331,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     bytes[1] = std::byte{'w'};
     bytes[2] = std::byte{'A'};
     bytes[3] = std::byte{'='};
-    std::basic_string_view<std::byte> b64_bytes{bytes.data(), bytes.size()};
+    const_span<std::byte> b64_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_base64(b64_bytes));
     REQUIRE(oxenc::from_base64(b64_bytes) == "\xff\x00"sv);
 
@@ -497,7 +490,7 @@ TEST_CASE("std::byte decoding", "[decoding][hex][base32z][base64]") {
 
 TEST_CASE("append_encoded", "[encoding][decoding]") {
 
-    auto pre_encoded = "d1:a3:fooe"sv;
+    auto pre_encoded = "d1:a3:fooe"_csp;
 
     oxenc::bt_list_producer btlp;
 
@@ -507,7 +500,8 @@ TEST_CASE("append_encoded", "[encoding][decoding]") {
 
     CHECK(encoded_list == "ld1:a3:fooee"sv);
 
-    oxenc::bt_list_consumer btlc{encoded_list};
+    CHECK_NOTHROW(oxenc::bt_list_consumer{encoded_list});
+    oxenc::bt_list_consumer btlc{"ld1:a3:fooee"};
 
     oxenc::bt_dict_consumer dict_from_list{btlc.consume_dict_consumer()};
     CHECK(dict_from_list.require<std::string>("a"sv) == "foo"s);
@@ -516,11 +510,12 @@ TEST_CASE("append_encoded", "[encoding][decoding]") {
 
     btdp.append_encoded("dict"sv, pre_encoded);
 
-    auto encoded_dict = btdp.view();
+    auto encoded_dict = btdp.span();
 
-    CHECK(encoded_dict == "d4:dictd1:a3:fooee"sv);
+    CHECK(encoded_dict == "d4:dictd1:a3:fooee"_csp);
 
-    oxenc::bt_dict_consumer btdc{encoded_dict};
+    CHECK_NOTHROW(oxenc::bt_dict_consumer{encoded_dict});
+    oxenc::bt_dict_consumer btdc{"d4:dictd1:a3:fooee"};
 
     oxenc::bt_dict_consumer dict_from_dict{btdc.require<oxenc::bt_dict_consumer>("dict"sv)};
     CHECK(dict_from_dict.require<std::string>("a"sv) == "foo"s);

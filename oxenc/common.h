@@ -7,14 +7,10 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <utility>
 
 namespace oxenc {
-
-template <typename T>
-concept string_view_compatible = std::convertible_to<T, std::string_view> ||
-                                 std::convertible_to<T, std::basic_string_view<unsigned char>> ||
-                                 std::convertible_to<T, std::basic_string_view<std::byte>>;
-
 template <typename Char>
 concept basic_char = sizeof(Char) == 1 && !std::same_as<std::remove_cv_t<Char>, bool> &&
                      (std::integral<Char> || std::same_as<std::remove_cv_t<Char>, std::byte>);
@@ -36,17 +32,33 @@ concept tuple_like = requires { std::tuple_size<Tuple>::value; };
 
 namespace detail {
     template <typename T>
-    inline constexpr bool string_type = false;
+    inline constexpr bool char_string_type = false;
     template <basic_char T>
-    inline constexpr bool string_type<std::basic_string<T>> = true;
+    inline constexpr bool char_string_type<std::basic_string<T>> = true;
+
+    template <typename T>
+    inline constexpr bool char_view_type = false;
     template <basic_char T>
-    inline constexpr bool string_type<std::basic_string_view<T>> = true;
+    inline constexpr bool char_view_type<std::basic_string_view<T>> = true;
 }  // namespace detail
+
+template <typename ForwardIt, typename ItValueType = std::iterator_traits<ForwardIt>::value_type>
+concept ordered_pair_iterator =
+        std::forward_iterator<ForwardIt> && std::tuple_size<ItValueType>::value == 2 &&
+        requires(ForwardIt it) {
+            typename ItValueType::first_type;
+            typename ItValueType::second_type;
+        } &&
+        !std::same_as<
+                typename std::unordered_map<
+                        typename ItValueType::first_type,
+                        typename ItValueType::second_type>::iterator,
+                ForwardIt>;
 
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.
 template <typename T, typename U = std::remove_cv_t<T>>
-concept string_like = detail::string_type<U>;
+concept string_like = detail::char_string_type<U> || detail::char_view_type<U>;
 
 /// Accept anything that looks iterable (except for string-like types); value serialization
 /// validity isn't checked here (it fails via the base case static assert).

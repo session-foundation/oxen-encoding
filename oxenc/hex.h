@@ -119,14 +119,22 @@ std::string to_hex(It begin, It end) {
 }
 
 /// Creates a hex string from an iterable, std::string-like object
-template <typename CharT>
+template <basic_char Char>
+std::string to_hex(std::span<Char> s) {
+    return to_hex(s.begin(), s.end());
+}
+
+/// Creates a hex string from an iterable, std::string-like object
+template <basic_char CharT>
 std::string to_hex(std::basic_string_view<CharT> s) {
     return to_hex(s.begin(), s.end());
 }
+
 inline std::string to_hex(std::string_view s) {
     return to_hex<>(s);
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string to_hex(const std::basic_string<CharT>& s) {
     return to_hex(s.begin(), s.end());
 }
@@ -166,10 +174,22 @@ constexpr bool is_hex(It begin, It end) {
 }
 
 /// Returns true if all elements in the string-like value are hex characters
-template <typename CharT>
+template <basic_char CharT>
+constexpr bool is_hex(std::span<CharT> s) {
+    return is_hex(s.begin(), s.end());
+}
+
+/// Returns true if all elements in the string-like value are hex characters
+template <basic_char CharT>
 constexpr bool is_hex(std::basic_string_view<CharT> s) {
     return is_hex(s.begin(), s.end());
 }
+
+template <basic_char CharT>
+constexpr bool is_hex(const std::basic_string<CharT>& s) {
+    return is_hex(s.begin(), s.end());
+}
+
 constexpr bool is_hex(std::string_view s) {
     return is_hex(s.begin(), s.end());
 }
@@ -264,14 +284,23 @@ std::string from_hex(It begin, It end) {
 
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-template <typename CharT>
+template <basic_char CharT>
+std::string from_hex(std::span<CharT> s) {
+    return from_hex(s.begin(), s.end());
+}
+
+/// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
+/// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
+template <basic_char CharT>
 std::string from_hex(std::basic_string_view<CharT> s) {
     return from_hex(s.begin(), s.end());
 }
+
 inline std::string from_hex(std::string_view s) {
-    return from_hex<>(s);
+    return from_hex(s.begin(), s.end());
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string from_hex(const std::basic_string<CharT>& s) {
     return from_hex(s.begin(), s.end());
 }

@@ -12,19 +12,32 @@ template <typename T>
 inline constexpr bool const_span_type = false;
 template <basic_char T>
 inline constexpr bool const_span_type<const_span<T>> = true;
+
+template <typename T>
+inline constexpr bool char_span_type = false;
+template <basic_char T>
+inline constexpr bool char_span_type<std::span<T>> = true;
 }  // namespace detail
 
 template <typename T, typename U = std::remove_cv_t<T>>
-concept const_span_like = detail::const_span_type<U>;
+concept const_span_type = detail::const_span_type<U>;
+
+template <typename T>
+concept const_span_convertible = std::convertible_to<T, const_span<char>> ||
+                                 std::convertible_to<T, const_span<unsigned char>> ||
+                                 std::convertible_to<T, const_span<std::byte>>;
 
 template <typename T>
 concept char_span_convertible = std::convertible_to<T, std::span<char>> ||
                                 std::convertible_to<T, std::span<unsigned char>> ||
                                 std::convertible_to<T, std::span<std::byte>>;
 
+template <typename T>
+concept span_convertible_type = const_span_convertible<T> || char_span_convertible<T>;
+
 namespace detail {
 template <basic_char T>
-std::string_view to_sv(const std::span<T>& x) {
+std::string_view span_to_sv(std::span<T>& x) {
     return {reinterpret_cast<const char*>(x.data()), x.size()};
 }
 }  // namespace detail
@@ -53,7 +66,7 @@ struct literal {
     inline static constexpr size_t size{N - 1};
     T arr[N];
 
-    constexpr const_span<const T> span() const { return {arr, size}; }
+    constexpr const_span<T> span() const { return {arr, size}; }
 };
 
 template <size_t N>

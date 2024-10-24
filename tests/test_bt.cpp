@@ -398,85 +398,6 @@ std::basic_string_view<Char> to_sv(std::string_view x) {
     return {reinterpret_cast<const Char*>(x.data()), x.size()};
 }
 
-TEST_CASE("bt_producer with non-char values", "[bt][dict][producer][char]") {
-    oxenc::bt_list_producer l;
-    oxenc::bt_dict_producer d;
-
-    auto val = "xyz"s;
-    std::basic_string<unsigned char> val_uc{
-            reinterpret_cast<const unsigned char*>(val.data()), val.size()};
-    std::basic_string<std::byte> val_b{reinterpret_cast<const std::byte*>(val.data()), val.size()};
-
-    l.append(val);
-    l.append(val_uc);
-    l.append(val_b);
-    l += val;
-    l += val_uc;
-    l += val_b;
-
-    d.append("a", val);
-    d.append("b", val);
-    d.append("c", val);
-
-    auto l_exp = "l3:xyz3:xyz3:xyz3:xyz3:xyz3:xyze"sv;
-    CHECK(l.view() == l_exp);
-    CHECK(l.view<unsigned char>() == to_sv<unsigned char>(l_exp));
-    CHECK(l.view<std::byte>() == to_sv<std::byte>(l_exp));
-
-    auto d_exp = "d1:a3:xyz1:b3:xyz1:c3:xyze"sv;
-    CHECK(d.view() == d_exp);
-    CHECK(d.view<unsigned char>() == to_sv<unsigned char>(d_exp));
-    CHECK(d.view<std::byte>() == to_sv<std::byte>(d_exp));
-}
-
-TEST_CASE("bt_consumer with non-char values", "[bt][dict][consumer][char]") {
-    auto val = "xyz"sv;
-    std::basic_string_view<unsigned char> val_uc{
-            reinterpret_cast<const unsigned char*>(val.data()), val.size()};
-    std::basic_string_view<std::byte> val_b{
-            reinterpret_cast<const std::byte*>(val.data()), val.size()};
-
-    const oxenc::bt_list_consumer l{"l3:xyze"};
-    CHECK(oxenc::bt_list_consumer{l}.consume_string_view() == val);
-    CHECK(oxenc::bt_list_consumer{l}.consume_string_view<unsigned char>() == val_uc);
-    CHECK(oxenc::bt_list_consumer{l}.consume_string_view<std::byte>() == val_b);
-    CHECK(oxenc::bt_list_consumer{l}.consume_string() == val);
-    CHECK(oxenc::bt_list_consumer{l}.consume_string<unsigned char>() == val_uc);
-    CHECK(oxenc::bt_list_consumer{l}.consume_string<std::byte>() == val_b);
-
-    CHECK(oxenc::bt_list_consumer{std::basic_string_view<unsigned char>{
-                                          reinterpret_cast<const unsigned char*>("l3:xyze")}}
-                  .consume_string() == "xyz");
-    CHECK(oxenc::bt_list_consumer{
-                  std::basic_string_view<std::byte>{reinterpret_cast<const std::byte*>("l3:xyze")}}
-                  .consume_string() == "xyz");
-
-    const oxenc::bt_dict_consumer d{"d1:a3:xyze"};
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string_view() == val);
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string_view<unsigned char>() == val_uc);
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string_view<std::byte>() == val_b);
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string() == val);
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string<unsigned char>() == val_uc);
-    CHECK(oxenc::bt_dict_consumer{d}.consume_string<std::byte>() == val_b);
-
-    CHECK(oxenc::bt_dict_consumer{d}.next_string() == std::make_pair("a"sv, val));
-    CHECK(oxenc::bt_dict_consumer{d}.next_string<unsigned char>() == std::make_pair("a"sv, val_uc));
-    CHECK(oxenc::bt_dict_consumer{d}.next_string<std::byte>() == std::make_pair("a"sv, val_b));
-
-    std::basic_string_view<unsigned char> le_uc{reinterpret_cast<const unsigned char*>("le"), 2};
-    std::basic_string_view<std::byte> le_b{reinterpret_cast<const std::byte*>("le"), 2};
-    std::basic_string_view<unsigned char> de_uc{reinterpret_cast<const unsigned char*>("de"), 2};
-    std::basic_string_view<std::byte> de_b{reinterpret_cast<const std::byte*>("de"), 2};
-    CHECK(oxenc::bt_dict_consumer{"d1:alee"}.consume_list_data<unsigned char>() == le_uc);
-    CHECK(oxenc::bt_dict_consumer{"d1:alee"}.consume_list_data<std::byte>() == le_b);
-    CHECK(oxenc::bt_dict_consumer{"d1:adee"}.consume_dict_data<unsigned char>() == de_uc);
-    CHECK(oxenc::bt_dict_consumer{"d1:adee"}.consume_dict_data<std::byte>() == de_b);
-    CHECK(oxenc::bt_list_consumer{"llee"}.consume_list_data<unsigned char>() == le_uc);
-    CHECK(oxenc::bt_list_consumer{"llee"}.consume_list_data<std::byte>() == le_b);
-    CHECK(oxenc::bt_list_consumer{"ldee"}.consume_dict_data<unsigned char>() == de_uc);
-    CHECK(oxenc::bt_list_consumer{"ldee"}.consume_dict_data<std::byte>() == de_b);
-}
-
 TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer][consumer]") {
     auto char_sp =
             "on some tuesdays i prefer to have my afternoon tea au naturale in the foyer"_csp;
@@ -604,8 +525,8 @@ TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
     }
 
     SECTION("Success cases - string conversion types") {
-        std::basic_string<uint8_t> ustr;
-        REQUIRE_NOTHROW(ustr = btdp.require<std::basic_string<uint8_t>>("E"));
+        const_span<unsigned char> ustr;
+        REQUIRE_NOTHROW(ustr = btdp.require<const_span<unsigned char>>("E"));
     }
 }
 
@@ -618,59 +539,57 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
     l.append("c");
     l.append("d");
 
-    using ustring_view = std::basic_string_view<unsigned char>;
-    using bstring_view = std::basic_string_view<std::byte>;
-
-    d.append_signature("~1", [](std::string_view to_sign) {
-        CHECK(to_sign == "d1:ai1e1:b1:2");
-        return "sig1"s;
+    d.append_signature("~1", [](const_span<char> to_sign) {
+        CHECK(to_sign == "d1:ai1e1:b1:2"sv);
+        return "sig1"sv;
     });
-    d.append_signature("~2", [](bstring_view to_sign) {
-        CHECK(to_sign == to_sv<std::byte>("d1:ai1e1:b1:22:~14:sig1"));
+    d.append_signature("~2", [](const_span<std::byte> to_sign) {
+        CHECK(to_sign == "d1:ai1e1:b1:22:~14:sig1"_bsp);
         return "sig2"sv;
     });
-    d.append_signature("~3", [](const ustring_view& to_sign) {
-        CHECK(to_sign == to_sv<unsigned char>("d1:ai1e1:b1:22:~14:sig12:~24:sig2"));
-        std::array<unsigned char, 4> sig{{0x73, 0x69, 0x67, 0x33}};
-        return sig;
+
+    std::array<unsigned char, 4> sigoutside{{0x73, 0x69, 0x67, 0x33}};
+
+    d.append_signature("~3", [&sigoutside](const_span<unsigned char> to_sign) {
+        CHECK(to_sign == "d1:ai1e1:b1:22:~14:sig12:~24:sig2"_usp);
+        return sigoutside;
     });
-    CHECK(d.view_for_signing() == "d1:ai1e1:b1:22:~14:sig12:~24:sig22:~34:sig3");
+
     CHECK(d.view() == "d1:ai1e1:b1:22:~14:sig12:~24:sig22:~34:sig3e");
 
-    l.append_signature([](const std::string_view to_sign) {
-        CHECK(to_sign == "l1:c1:d");
-        return "sig";
+    l.append_signature([](const const_span<char> to_sign) {
+        CHECK(to_sign == "l1:c1:d"sv);
+        return "sig"_csp;
     });
-    l.append_signature([](const std::string_view& to_sign) {
-        CHECK(to_sign == "l1:c1:d3:sig");
-        return to_sv<std::byte>("sig2"sv);
+    l.append_signature([](const const_span<char>& to_sign) {
+        CHECK(to_sign == "l1:c1:d3:sig"sv);
+        return "sig2"_bsp;
     });
-    l.append_signature([](std::string_view to_sign) {
-        CHECK(to_sign == "l1:c1:d3:sig4:sig2");
-        return to_sv<unsigned char>("sig3"sv);
+    l.append_signature([](const_span<char> to_sign) {
+        CHECK(to_sign == "l1:c1:d3:sig4:sig2"sv);
+        return "sig3"_usp;
     });
 
-    CHECK(l.view_for_signing<std::byte>() == to_sv<std::byte>("l1:c1:d3:sig4:sig24:sig3"sv));
     CHECK(l.view() == "l1:c1:d3:sig4:sig24:sig3e");
 
     bt_dict_consumer dc{d.view()};
     CHECK(dc.next_integer<int>() == std::make_pair("a"sv, 1));
     CHECK(dc.next_string() == std::make_pair("b"sv, "2"sv));
-    auto [key, msg, sig] = dc.next_signature();
+    auto [key, msg, sig] = dc.next_signature_view();
     CHECK(key == "~1");
     CHECK(msg == "d1:ai1e1:b1:2");
     CHECK(sig == "sig1");
     CHECK(dc.skip_until("~2"sv));
-    REQUIRE_NOTHROW(dc.consume_signature([](bstring_view msg, bstring_view sig) {
-        if (msg != to_sv<std::byte>("d1:ai1e1:b1:22:~14:sig1"))
+    REQUIRE_NOTHROW(dc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
+        if (msg != "d1:ai1e1:b1:22:~14:sig1"_bsp)
             throw std::runtime_error{"bad msg"};
-        if (sig != to_sv<std::byte>("sig2"))
+        if (sig != "sig2"_bsp)
             throw std::runtime_error{"bad sig"};
     }));
 
-    CHECK_THROWS(dc.consume_signature([](bstring_view msg, bstring_view sig) {
-        CHECK(msg == to_sv<std::byte>("d1:ai1e1:b1:22:~14:sig12:~24:sig2"));
-        CHECK(sig == to_sv<std::byte>("sig3"));
+    CHECK_THROWS(dc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
+        CHECK(msg == "d1:ai1e1:b1:22:~14:sig12:~24:sig2"_bsp);
+        CHECK(sig == "sig3"_bsp);
         throw std::runtime_error{"test throw"};
     }));
 
@@ -687,13 +606,13 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
         CHECK(msg == "l1:c1:d");
         CHECK(sig == "sig");
     });
-    lc.consume_signature([](bstring_view msg, bstring_view sig) {
-        CHECK(msg == to_sv<std::byte>("l1:c1:d3:sig"));
-        CHECK(sig == to_sv<std::byte>("sig2"));
+    lc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
+        CHECK(msg == "l1:c1:d3:sig"_bsp);
+        CHECK(sig == "sig2"_bsp);
     });
-    lc.consume_signature([](ustring_view msg, ustring_view sig) {
-        CHECK(msg == to_sv<unsigned char>("l1:c1:d3:sig4:sig2"));
-        CHECK(sig == to_sv<unsigned char>("sig3"));
+    lc.consume_signature([](const_span<unsigned char> msg, const_span<unsigned char> sig) {
+        CHECK(msg == "l1:c1:d3:sig4:sig2"_usp);
+        CHECK(sig == "sig3"_usp);
     });
 
     // Should not compile:
@@ -710,10 +629,10 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
             bt_dict_producer dp2;
             dp2.append("a", 1);
             std::string sig_key(static_cast<size_t>(len), 'x');
-            dp2.append_signature(sig_key, [](std::string_view) { return "sig"; });
+            dp2.append_signature(sig_key, [](std::string_view) { return "sig"sv; });
             bt_dict_consumer dc2{dp2.view()};
             CHECK(dc2.next_integer<int>() == std::make_pair("a"sv, 1));
-            auto [key, msg, sig] = dc2.next_signature();
+            auto [key, msg, sig] = dc2.next_signature_view();
             CHECK(key == sig_key);
             CHECK(msg == "d1:ai1e");
             CHECK(sig == "sig");

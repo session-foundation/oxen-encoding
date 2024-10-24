@@ -12,9 +12,8 @@
 #include <utility>
 
 #ifndef NDEBUG
-#include "bt_serialize.h"
 #endif
-
+#include "bt_serialize.h"
 #include "common.h"
 #include "span.h"
 #include "variant.h"
@@ -58,41 +57,33 @@ char* apple_to_chars10(char* buf, IntType val) {
 
 namespace detail {
 
-    template <basic_char Char>
-    std::string_view to_sv(const std::basic_string_view<Char>& x) {
-        return {reinterpret_cast<const char*>(x.data()), x.size()};
-    }
-
-    template <typename Class, typename SignFunc>
+    template <typename Class, detail::sign_func_hook SignFunc>
     auto append_signature_helper(Class& self, SignFunc sign) {
-        using Char = std::conditional_t<
-                std::invocable<SignFunc, std::string_view&&>,
-                char,
-                std::conditional_t<
-                        std::invocable<SignFunc, std::basic_string_view<unsigned char>&&>,
-                        unsigned char,
-                        std::conditional_t<
-                                std::invocable<SignFunc, std::basic_string_view<std::byte>&&>,
-                                std::byte,
-                                void>>>;
-        static_assert(
-                !std::is_void_v<Char>,
-                "append_signature signing function must take a string_view (or unsigned "
-                "char/std::byte variants)");
+        using traits = function_traits<SignFunc>;
+        using InputT = typename traits::template argument_type<0>;
+        using CharIn = typename InputT::value_type;
+        using RetT = typename std::remove_cvref_t<typename traits::return_type>;
 
-        auto result = sign(self.template view_for_signing<Char>());
-        if constexpr (
-                std::same_as<decltype(result), char*> ||
-                std::same_as<decltype(result), const char*>)
-            return std::string_view{result};
-        else {
-            static_assert(
-                    sizeof(*result.data()) == 1,
-                    "append_signature signing function must return a container of bytes/chars");
-            return result;
-        }
+        RetT sig;
+
+        if constexpr (std::same_as<std::string_view, InputT>)
+            sig = sign(self.template view_for_signing<char>());
+        else
+            sig = sign(self.template span_for_signing<CharIn>());
+
+        if constexpr (const_span_convertible<RetT>) {
+            return const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()};
+        } else if constexpr (std::is_convertible_v<RetT, std::string_view>) {
+            return std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()};
+        } else
+            throw std::invalid_argument{
+                    "Signing function requires char-view-convertible or const-span-convertible "
+                    "type return!"};
     }
 }  // namespace detail
+
+template <typename T>
+concept encoded_input = detail::char_view_type<T> || const_span_type<T>;
 
 /// Class that allows you to build a bt-encoded list manually, optionally without copying or
 /// allocating memory.  This is essentially the reverse of bt_list_consumer: where it lets you
@@ -216,6 +207,26 @@ class bt_list_producer {
     }
 
   public:
+    /// Returns a span of the current serialized list values suitable for signing.  The returned
+    /// value is the currently serialized list data up to but not including the terminating `e`
+    /// (since that `e` will be overwritten if another item, i.e. a signature, is appended), and
+    /// thus includes all values added to the list so far.  Typically this doesn't need to be used
+    /// directly but rather can use `append_signature` to generate an append a signature over a
+    /// list's prior elements.
+    template <basic_char CharT = char>
+    const_span<CharT> span_for_signing() const {
+        auto s = span<CharT>();
+        return s.first(s.size() - 1);
+    }
+
+    template <typename Char = char>
+    std::basic_string_view<Char> view_for_signing() const {
+        auto v = view<Char>();
+        v.remove_suffix(1);
+        return v;
+    }
+
+  public:
     bt_list_producer(const bt_list_producer&) = delete;
     bt_list_producer& operator=(const bt_list_producer&) = delete;
     bt_list_producer& operator=(bt_list_producer&&) = delete;
@@ -236,6 +247,21 @@ class bt_list_producer {
     explicit bt_list_producer(size_t reserve = 0) : bt_list_producer{'l', reserve} {}
 
     ~bt_list_producer();
+
+    /// Returns a const_span into the currently serialized data buffer.  Note that the returned
+    /// span includes the `e` list end serialization markers which will be overwritten if the list
+    /// (or an active sublist/subdict) is appended to.  Can optionally return a const_span of
+    /// a char-like type other than char for convenience.
+    template <basic_char CharT = char>
+    const_span<CharT> span() const {
+        const char* x;
+        if (auto* s = std::get_if<std::string>(&out))
+            x = s->data();
+        else
+            x = var::get<buf_span>(out).init;
+
+        return const_span<CharT>{reinterpret_cast<const CharT*>(x) + from, next - from + 1};
+    }
 
     /// Returns a string_view into the currently serialized data buffer.  Note that the returned
     /// view includes the `e` list end serialization markers which will be overwritten if the list
@@ -294,19 +320,6 @@ class bt_list_producer {
             s->reserve(new_cap);
     }
 
-    /// Returns a view of the current serialized list values suitable for signing.  The returned
-    /// value is the currently serialized list data up to but not including the terminating `e`
-    /// (since that `e` will be overwritten if another item, i.e. a signature, is appended), and
-    /// thus includes all values added to the list so far.  Typically this doesn't need to be used
-    /// directly but rather can use `append_signature` to generate an append a signature over a
-    /// list's prior elements.
-    template <typename Char = char>
-    std::basic_string_view<Char> view_for_signing() const {
-        auto v = view<Char>();
-        v.remove_suffix(1);
-        return v;
-    }
-
     /// Returns the end position in the buffer.  (This is primarily useful for external buffer
     /// mode, but still works in string mode).
     const char* end() const {
@@ -317,8 +330,16 @@ class bt_list_producer {
         return bs->init + next + 1;
     }
 
+    template <string_like T>
+    void append(const T& data) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to list when a sublist is active"};
+        append_impl(data.data(), data.size());
+        append_intermediate_ends();
+    }
+
     /// Appends an element containing binary string data
-    template <string_view_compatible T>
+    template <char_span_convertible T>
     void append(const T& data) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -327,11 +348,10 @@ class bt_list_producer {
     }
 
     /// Appends an element containing a const Char string
-    template <basic_char T, size_t N>
-    void append(const T (&s)[N]) {
+    void append(std::string_view s) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
-        append_impl(s, N - 1);
+        append_impl(s);
         append_intermediate_ends();
     }
 
@@ -344,12 +364,6 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
-    template <string_view_compatible T>
-    bt_list_producer& operator+=(const T& data) {
-        append(data);
-        return *this;
-    }
-
     /// Appends an integer (including bools)
     template <std::integral IntType>
     void append(IntType i) {
@@ -357,6 +371,29 @@ class bt_list_producer {
             throw std::logic_error{"Cannot append to list when a sublist is active"};
         append_impl(i);
         append_intermediate_ends();
+    }
+
+    template <string_like T>
+    bt_list_producer& operator+=(const T& data) {
+        append(data);
+        return *this;
+    }
+
+    bt_list_producer& operator+=(std::string_view s) {
+        append(s);
+        return *this;
+    }
+
+    template <char_span_convertible T>
+    bt_list_producer& operator+=(const T& data) {
+        append(data);
+        return *this;
+    }
+
+    template <basic_char T>
+    bt_list_producer& operator+=(const std::span<T>& data) {
+        append(data);
+        return *this;
     }
 
     template <std::integral IntType>
@@ -471,10 +508,9 @@ class bt_list_producer {
     /// The signing callable must return either a C string literal or a container of single-byte
     /// elements with contiguous storage with `data()` and `size()` members; e.g. `std::string`,
     /// `std::basic_string_view<std::byte>`, `std::array<unsigned char, 32>` and so on.
-    template <typename SignFunc>
+    template <detail::sign_func_hook SignFunc>
     void append_signature(SignFunc&& sign) {
-        auto result = detail::append_signature_helper(*this, std::forward<SignFunc>(sign));
-        append(std::string_view{reinterpret_cast<const char*>(result.data()), result.size()});
+        append(detail::append_signature_helper(*this, std::forward<SignFunc>(sign)));
     }
 
     /// Appends an already bt-encoded string as-is to the list.  This is useful for signed
@@ -487,13 +523,13 @@ class bt_list_producer {
     /// Caveat emptor: this can *absolutely* be a foot-shotgun.  The rest of this class is
     /// designed such that if it *does* give you an output bt-encoded string, it *will* be
     /// valid bt-encoding.  This method violates that property.
-    template <string_view_compatible T>
+    template <encoded_input T>
     void append_encoded(T encoded) {
 #ifndef NDEBUG
         // on debug build, throw if `encoded` is invalid bt-encoded data
         (void)bt_deserialize<bt_value>(encoded);
 #endif
-        buffer_append(encoded);
+        buffer_append(reinterpret_cast<const char*>(encoded.data()), encoded.size());
         append_intermediate_ends();
     }
 };
@@ -508,7 +544,6 @@ class bt_dict_producer : bt_list_producer {
     friend class bt_list_producer;
 
     // Subdict constructors
-
     bt_dict_producer(bt_list_producer* parent) : bt_list_producer{parent, 'd'} {}
     bt_dict_producer(bt_dict_producer* parent) : bt_list_producer{parent, 'd'} {}
 
@@ -540,10 +575,15 @@ class bt_dict_producer : bt_list_producer {
     /// be passed a non-zero value to reserve an initial size in the std::string.
     explicit bt_dict_producer(size_t reserve = 0) : bt_list_producer{'d', reserve} {}
 
+    template <basic_char CharT = char>
+    const_span<CharT> span() const {
+        return bt_list_producer::span<CharT>();
+    }
+
     /// Returns a string_view (or basic_string_view<Char>) into the currently serialized data
     /// buffer.  Note that the returned view includes the `e` dict end serialization markers which
     /// will be overwritten if the dict (or an active sublist/subdict) is appended to.
-    template <typename Char = char>
+    template <basic_char Char = char>
     std::basic_string_view<Char> view() const {
         return bt_list_producer::view<Char>();
     }
@@ -569,12 +609,17 @@ class bt_dict_producer : bt_list_producer {
     /// Calls `.reserve()` on the underlying std::string, if using string-builder mode.
     void reserve(size_t new_cap) { bt_list_producer::reserve(new_cap); }
 
-    /// Returns a view of the current serialized dict keys/values suitable for signing.  The
+    /// Returns a const_span of the current serialized dict keys/values suitable for signing.  The
     /// returned value is the currently serialized dict data up to but not including the terminating
     /// `e` (since that `e` will be overwritten if another key is appended), and thus includes all
     /// keys and values added to the dict so far.  Typically this doesn't need to be used directly
     /// but rather can use `append_signature` to generate an append a signature over a dict's prior
     /// fields.
+    template <typename CharT = char>
+    const_span<CharT> span_for_signing() const {
+        return bt_list_producer::span_for_signing<CharT>();
+    }
+
     template <typename Char = char>
     std::basic_string_view<Char> view_for_signing() const {
         return bt_list_producer::view_for_signing<Char>();
@@ -583,10 +628,22 @@ class bt_dict_producer : bt_list_producer {
     /// Returns the end position in the buffer.
     const char* end() const { return bt_list_producer::end(); }
 
-    /// Appends a key-value pair with a string or integer value.  The key must be > the last key
+    /// Appends a key-value pair with a string literal value. The key must be > than the last key
     /// added, but this is only enforced (with an assertion) in debug builds.
+    // template <basic_char T, size_t N>
+    void append(std::string_view key, std::string_view value) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to list when a sublist is active"};
+        check_incrementing_key(key);
+        append_impl(key);
+        append_impl(value);
+        append_intermediate_ends();
+    }
+
+    /// Appends a key-value pair with a string or integer value.  The key must be > than the last
+    /// key added, but this is only enforced (with an assertion) in debug builds.
     template <typename T>
-    requires string_view_compatible<T> || std::integral<T>
+    requires char_span_convertible<T> || std::integral<T>
     void append(std::string_view key, const T& value) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -638,20 +695,10 @@ class bt_dict_producer : bt_list_producer {
     /// Also note that the range *must* be sorted by keys, which means either using an ordered
     /// container (e.g. std::map) or a manually ordered container (such as a vector or list of
     /// pairs).  unordered_map, however, is not acceptable.
-    template <typename ForwardIt>
-    requires(!string_view_compatible<ForwardIt>)
+    template <ordered_pair_iterator ForwardIt>
     void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
-        using KeyType = std::remove_cv_t<std::decay_t<decltype(from->first)>>;
-        using ValType = std::decay_t<decltype(from->second)>;
-        static_assert(string_view_compatible<decltype(from->first)>);
-        static_assert(string_view_compatible<ValType> || std::integral<ValType>);
-        using BadUnorderedMap = std::unordered_map<KeyType, ValType>;
-        static_assert(
-                !(  // Disallow unordered_map iterators because they are not going to be ordered.
-                        std::same_as<typename BadUnorderedMap::iterator, ForwardIt> ||
-                        std::same_as<typename BadUnorderedMap::const_iterator, ForwardIt>));
         while (from != to) {
             const auto& [k, v] = *from++;
             check_incrementing_key(k);
@@ -661,8 +708,7 @@ class bt_dict_producer : bt_list_producer {
         append_intermediate_ends();
     }
 
-    template <typename ForwardIt>
-    requires(!string_view_compatible<ForwardIt>)
+    template <ordered_pair_iterator ForwardIt>
     [[deprecated("Use extend instead")]] void append(ForwardIt from, ForwardIt to) {
         extend(from, to);
     }
@@ -746,10 +792,10 @@ class bt_dict_producer : bt_list_producer {
     /// Since the signature signs all previous values, it is typically recommended that the
     /// signature use a late-sorting key; "~" (which is 0x7e, and the last printable 7-bit ascii
     /// value) is suggested.
-    template <typename SignFunc>
+
+    template <detail::sign_func_hook SignFunc>
     void append_signature(std::string_view key, SignFunc&& sign) {
-        auto result = detail::append_signature_helper(*this, std::forward<SignFunc>(sign));
-        append(key, std::string_view{reinterpret_cast<const char*>(result.data()), result.size()});
+        append(key, detail::append_signature_helper(*this, std::forward<SignFunc>(sign)));
     }
 
     /// Appends an already bt-encoded string as-is to the dict.  This is useful for signed
@@ -762,7 +808,7 @@ class bt_dict_producer : bt_list_producer {
     /// Caveat emptor: this can *absolutely* be a foot-shotgun.  The rest of this class is
     /// designed such that if it *does* give you an output bt-encoded string, it *will* be
     /// valid bt-encoding.  This method violates that property.
-    template <string_view_compatible T>
+    template <encoded_input T>
     void append_encoded(std::string_view key, T encoded) {
         check_incrementing_key(key);
         append_impl(key);

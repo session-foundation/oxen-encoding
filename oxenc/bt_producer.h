@@ -57,8 +57,8 @@ char* apple_to_chars10(char* buf, IntType val) {
 
 namespace detail {
 
-    template <typename Class, detail::sign_func_hook SignFunc>
-    auto append_signature_helper(Class& self, SignFunc sign) {
+    template <typename Class, detail::sign_func_hook SignFunc, typename... AppendArgs>
+    void append_signature_helper(Class& self, SignFunc sign, AppendArgs&&... app_args) {
         using traits = function_traits<SignFunc>;
         using InputT = typename traits::template argument_type<0>;
         using CharIn = typename InputT::value_type;
@@ -72,13 +72,14 @@ namespace detail {
             sig = sign(self.template span_for_signing<CharIn>());
 
         if constexpr (const_span_convertible<RetT>) {
-            return const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()};
+            self.append(std::forward<AppendArgs>(app_args)..., const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()});
         } else if constexpr (std::is_convertible_v<RetT, std::string_view>) {
-            return std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()};
+            self.append(std::forward<AppendArgs>(app_args)..., std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()});
         } else
-            throw std::invalid_argument{
+            static_assert(
+                    false,
                     "Signing function requires char-view-convertible or const-span-convertible "
-                    "type return!"};
+                    "type return!");
     }
 }  // namespace detail
 
@@ -510,7 +511,7 @@ class bt_list_producer {
     /// `std::basic_string_view<std::byte>`, `std::array<unsigned char, 32>` and so on.
     template <detail::sign_func_hook SignFunc>
     void append_signature(SignFunc&& sign) {
-        append(detail::append_signature_helper(*this, std::forward<SignFunc>(sign)));
+        detail::append_signature_helper(*this, std::forward<SignFunc>(sign));
     }
 
     /// Appends an already bt-encoded string as-is to the list.  This is useful for signed
@@ -795,7 +796,7 @@ class bt_dict_producer : bt_list_producer {
 
     template <detail::sign_func_hook SignFunc>
     void append_signature(std::string_view key, SignFunc&& sign) {
-        append(key, detail::append_signature_helper(*this, std::forward<SignFunc>(sign)));
+        detail::append_signature_helper(*this, std::forward<SignFunc>(sign), key);
     }
 
     /// Appends an already bt-encoded string as-is to the dict.  This is useful for signed

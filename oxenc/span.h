@@ -27,14 +27,6 @@ concept const_span_convertible = std::convertible_to<T, const_span<char>> ||
                                  std::convertible_to<T, const_span<unsigned char>> ||
                                  std::convertible_to<T, const_span<std::byte>>;
 
-template <typename T>
-concept char_span_convertible = std::convertible_to<T, std::span<char>> ||
-                                std::convertible_to<T, std::span<unsigned char>> ||
-                                std::convertible_to<T, std::span<std::byte>>;
-
-template <typename T>
-concept span_convertible_type = const_span_convertible<T> || char_span_convertible<T>;
-
 namespace detail {
 template <basic_char T>
 std::string_view span_to_sv(std::span<T>& x) {

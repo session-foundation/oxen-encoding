@@ -92,6 +92,24 @@ local macos_pipeline(name, arch, build_type) = {
 
 
 [
+  {
+    name: 'lint check',
+    kind: 'pipeline',
+    type: 'docker',
+    steps: [{
+      name: 'build',
+      image: docker_base + 'lint',
+      pull: 'always',
+      commands: [
+        'echo "Building on ${DRONE_STAGE_MACHINE}"',
+        apt_get_quiet + ' update',
+        apt_get_quiet + ' install -y eatmydata',
+        'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git clang-format-15 jsonnet',
+        './utils/ci/lint-check.sh',
+      ],
+    }],
+  },
+
   debian_pipeline('Debian sid (amd64)', docker_base + 'debian-sid'),
   debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug'),
   clang(16),

@@ -26,7 +26,7 @@ if [ "$1" = "verify" ] ; then
         exit 2
     fi
 else
-    $binary -i "${sources[@]}" &> /dev/null
+    $binary -i "${sources[@]}" &> /dev/null 
 fi
 
 jsonnet_format=$(command -v jsonnetfmt 2>/dev/null)

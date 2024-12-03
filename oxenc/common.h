@@ -40,20 +40,20 @@ namespace detail {
     inline constexpr bool char_view_type = false;
     template <basic_char T>
     inline constexpr bool char_view_type<std::basic_string_view<T>> = true;
+
+    template <typename It, typename K, typename V>
+    concept is_unordered_map_iterator =
+            std::same_as<It, typename std::unordered_map<K, V>::iterator> ||
+            std::same_as<It, typename std::unordered_map<K, V>::const_iterator>;
 }  // namespace detail
 
-template <typename ForwardIt, typename ItValueType = std::iterator_traits<ForwardIt>::value_type>
+template <typename ForwardIt, typename ItValueType = std::iter_value_t<ForwardIt>>
 concept ordered_pair_iterator =
         std::forward_iterator<ForwardIt> && std::tuple_size<ItValueType>::value == 2 &&
-        requires(ForwardIt it) {
-            typename ItValueType::first_type;
-            typename ItValueType::second_type;
-        } &&
-        !std::same_as<
-                typename std::unordered_map<
-                        typename ItValueType::first_type,
-                        typename ItValueType::second_type>::iterator,
-                ForwardIt>;
+        !detail::is_unordered_map_iterator<
+                ForwardIt,
+                std::remove_const_t<std::tuple_element_t<0, ItValueType>>,
+                std::tuple_element_t<1, ItValueType>>;
 
 // True if the type is a std::string, std::string_view, or some a basic_string<Char> for some
 // single-byte type Char.

@@ -75,14 +75,15 @@ namespace detail {
             self.append(
                     std::forward<AppendArgs>(app_args)...,
                     const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()});
-        } else if constexpr (std::is_convertible_v<RetT, std::string_view>) {
+        } else {
+            static_assert(
+                    std::is_convertible_v<RetT, std::string_view>,
+                    "Signing function requires char-view-convertible or const-span-convertible "
+                    "return type!");
             self.append(
                     std::forward<AppendArgs>(app_args)...,
                     std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()});
-        } else
-            throw std::invalid_argument(
-                    "Signing function requires char-view-convertible or const-span-convertible "
-                    "type return!");
+        }
     }
 }  // namespace detail
 
@@ -334,16 +335,16 @@ class bt_list_producer {
         return bs->init + next + 1;
     }
 
-    template <string_like T>
-    void append(const T& data) {
+    template <size_t N>
+    void append(const char (&h)[N]) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
-        append_impl(data.data(), data.size());
+        append_impl(h, N - 1);
         append_intermediate_ends();
     }
 
     /// Appends an element containing binary string data
-    template <char_span_convertible T>
+    template <const_span_convertible T>
     void append(const T& data) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};
@@ -359,7 +360,7 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
-    /// Appends an element containing const_span data
+    /// Appends an element containing span data
     template <basic_char T>
     void append(const std::span<T>& data) {
         if (has_child)
@@ -377,9 +378,9 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
-    template <string_like T>
-    bt_list_producer& operator+=(const T& data) {
-        append(data);
+    template <size_t N>
+    bt_list_producer& operator+=(const char (&h)[N]) {
+        append(h);
         return *this;
     }
 
@@ -388,7 +389,7 @@ class bt_list_producer {
         return *this;
     }
 
-    template <char_span_convertible T>
+    template <const_span_convertible T>
     bt_list_producer& operator+=(const T& data) {
         append(data);
         return *this;
@@ -644,10 +645,20 @@ class bt_dict_producer : bt_list_producer {
         append_intermediate_ends();
     }
 
+    template <size_t N>
+    void append(std::string_view key, const char (&h)[N]) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to list when a sublist is active"};
+        check_incrementing_key(key);
+        append_impl(key);
+        append_impl(h, N - 1);
+        append_intermediate_ends();
+    }
+
     /// Appends a key-value pair with a string or integer value.  The key must be > than the last
     /// key added, but this is only enforced (with an assertion) in debug builds.
     template <typename T>
-    requires char_span_convertible<T> || std::integral<T>
+    requires const_span_convertible<T> || std::integral<T>
     void append(std::string_view key, const T& value) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};

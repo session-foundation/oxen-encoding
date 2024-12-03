@@ -12,8 +12,9 @@
 #include <utility>
 
 #ifndef NDEBUG
-#endif
 #include "bt_serialize.h"
+#endif
+#include "bt_common.h"
 #include "common.h"
 #include "span.h"
 #include "variant.h"

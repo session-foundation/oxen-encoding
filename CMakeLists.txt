@@ -82,6 +82,7 @@ if(OXENC_INSTALL)
     oxenc/base32z.h
     oxenc/base64.h
     oxenc/bt.h
+    oxenc/bt_common.h
     oxenc/bt_producer.h
     oxenc/bt_serialize.h
     oxenc/bt_value.h

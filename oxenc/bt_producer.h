@@ -72,9 +72,13 @@ namespace detail {
             sig = sign(self.template span_for_signing<CharIn>());
 
         if constexpr (const_span_convertible<RetT>) {
-            self.append(std::forward<AppendArgs>(app_args)..., const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()});
+            self.append(
+                    std::forward<AppendArgs>(app_args)...,
+                    const_span<char>{reinterpret_cast<const char*>(sig.data()), sig.size()});
         } else if constexpr (std::is_convertible_v<RetT, std::string_view>) {
-            self.append(std::forward<AppendArgs>(app_args)..., std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()});
+            self.append(
+                    std::forward<AppendArgs>(app_args)...,
+                    std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()});
         } else
             static_assert(
                     false,

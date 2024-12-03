@@ -66,8 +66,8 @@ namespace detail {
 
         RetT sig;
 
-        if constexpr (std::same_as<std::string_view, InputT>)
-            sig = sign(self.template view_for_signing<char>());
+        if constexpr (detail::char_view_type<InputT>)
+            sig = sign(self.template view_for_signing<typename InputT::value_type>());
         else
             sig = sign(self.template span_for_signing<CharIn>());
 
@@ -195,9 +195,6 @@ class bt_list_producer {
         buffer_append(data, size);
     }
 
-    // Appends a string value, but does not call append_intermediate_ends()
-    void append_impl(std::string_view s) { append_impl(s.data(), s.size()); }
-
     void append_impl(const unsigned char* data, size_t size) {
         append_impl(reinterpret_cast<const char*>(data), size);
     }
@@ -206,8 +203,9 @@ class bt_list_producer {
         append_impl(reinterpret_cast<const char*>(data), size);
     }
 
-    template <basic_char T>
-    void append_impl(std::span<T> s) {
+    template <const_span_convertible T>
+    void append_impl(const T& v) {
+        std::span<const typename T::value_type> s{v};
         append_impl(reinterpret_cast<const char*>(s.data()), s.size());
     }
 

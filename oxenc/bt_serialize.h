@@ -64,7 +64,7 @@ namespace detail {
             const_span_convertible<T> || std::is_convertible_v<T, std::string_view>;
 
     template <typename T>
-    concept signverify_func_input = std::same_as<std::string_view, T> || const_span_type<T>;
+    concept signverify_func_input = detail::char_view_type<T> || const_span_type<T>;
 
     template <typename Func, typename F = std::remove_reference_t<Func>>
     concept lambda_function =
@@ -1362,17 +1362,14 @@ class bt_dict_consumer : private bt_list_consumer {
         using InputT = typename traits::template argument_type<0>;
         using CharT = typename InputT::value_type;
 
-        InputT k, msg, sig;
-
-        if constexpr (std::same_as<std::string_view, InputT>)
-            std::tie(k, msg, sig) = next_signature_view<char>();
-        else if constexpr (detail::const_span_type<InputT>)
-            std::tie(k, msg, sig) = next_signature_span<CharT>();
-        else
-            throw std::invalid_argument{
-                    "Verify function requires view or const-span type arguments!"};
-
-        verify(std::move(msg), std::move(sig));
+        if constexpr (detail::char_view_type<InputT>) {
+            auto [k, msg, sig] = next_signature_view<CharT>();
+            verify(std::move(msg), std::move(sig));
+        } else {
+            static_assert(detail::const_span_type<InputT>);
+            auto [k, msg, sig] = next_signature_span<CharT>();
+            verify(std::move(msg), std::move(sig));
+        }
     }
 
     /// Consumes a value into the given type (string_view, string, integer, bt_dict_consumer,

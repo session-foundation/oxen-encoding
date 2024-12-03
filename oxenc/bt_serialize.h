@@ -99,8 +99,8 @@ namespace detail {
                              signfunc_output<typename function_traits<F>::return_type>;
 
     template <typename Func, typename F = std::remove_reference_t<Func>, typename... arg>
-    concept void_return_func =
-            lambda_function<F> && std::is_void_v<typename function_traits<F>::return_type>;
+    concept void_return_func = lambda_function<F> && (signverify_func_input<arg> && ...) &&
+                               std::is_void_v<typename function_traits<F>::return_type>;
 
     template <typename T>
     concept consumer_input = const_span_type<T> || char_view_type<T>;
@@ -933,10 +933,13 @@ class bt_list_consumer {
         using InputT = typename traits::template argument_type<0>;
         using CharT = typename InputT::value_type;
 
-        return verify(
-                InputT{reinterpret_cast<const CharT*>(start),
-                       static_cast<size_t>(data.data() - start)},
-                consume<InputT>());
+        auto msg = InputT{
+                reinterpret_cast<const CharT*>(start), static_cast<size_t>(data.data() - start)};
+
+        if constexpr (std::same_as<std::string_view, InputT>)
+            return verify(std::move(msg), consume_string_view<char>());
+        else
+            return verify(std::move(msg), consume_span<CharT>());
     }
 
     /// Consumes a value without returning it.
@@ -1361,8 +1364,8 @@ class bt_dict_consumer : private bt_list_consumer {
 
         InputT k, msg, sig;
 
-        if constexpr (detail::char_view_type<InputT>)
-            std::tie(k, msg, sig) = next_signature_view<CharT>();
+        if constexpr (std::same_as<std::string_view, InputT>)
+            std::tie(k, msg, sig) = next_signature_view<char>();
         else if constexpr (detail::const_span_type<InputT>)
             std::tie(k, msg, sig) = next_signature_span<CharT>();
         else

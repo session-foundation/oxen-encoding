@@ -80,8 +80,7 @@ namespace detail {
                     std::forward<AppendArgs>(app_args)...,
                     std::string_view{reinterpret_cast<const char*>(sig.data()), sig.size()});
         } else
-            static_assert(
-                    false,
+            throw std::invalid_argument(
                     "Signing function requires char-view-convertible or const-span-convertible "
                     "type return!");
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-CLANG_FORMAT_DESIRED_VERSION=15
+CLANG_FORMAT_DESIRED_VERSION=16
 
 binary=$(command -v clang-format-$CLANG_FORMAT_DESIRED_VERSION 2>/dev/null)
 if [ $? -ne 0 ]; then
@@ -26,7 +26,7 @@ if [ "$1" = "verify" ] ; then
         exit 2
     fi
 else
-    $binary -i "${sources[@]}" &> /dev/null
+    $binary -i "${sources[@]}" &> /dev/null 
 fi
 
 jsonnet_format=$(command -v jsonnetfmt 2>/dev/null)

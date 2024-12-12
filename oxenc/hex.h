@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -119,14 +119,22 @@ std::string to_hex(It begin, It end) {
 }
 
 /// Creates a hex string from an iterable, std::string-like object
-template <typename CharT>
+template <basic_char Char>
+std::string to_hex(std::span<Char> s) {
+    return to_hex(s.begin(), s.end());
+}
+
+/// Creates a hex string from an iterable, std::string-like object
+template <basic_char CharT>
 std::string to_hex(std::basic_string_view<CharT> s) {
     return to_hex(s.begin(), s.end());
 }
+
 inline std::string to_hex(std::string_view s) {
     return to_hex<>(s);
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string to_hex(const std::basic_string<CharT>& s) {
     return to_hex(s.begin(), s.end());
 }
@@ -166,10 +174,22 @@ constexpr bool is_hex(It begin, It end) {
 }
 
 /// Returns true if all elements in the string-like value are hex characters
-template <typename CharT>
+template <basic_char CharT>
+constexpr bool is_hex(std::span<CharT> s) {
+    return is_hex(s.begin(), s.end());
+}
+
+/// Returns true if all elements in the string-like value are hex characters
+template <basic_char CharT>
 constexpr bool is_hex(std::basic_string_view<CharT> s) {
     return is_hex(s.begin(), s.end());
 }
+
+template <basic_char CharT>
+constexpr bool is_hex(const std::basic_string<CharT>& s) {
+    return is_hex(s.begin(), s.end());
+}
+
 constexpr bool is_hex(std::string_view s) {
     return is_hex(s.begin(), s.end());
 }
@@ -264,14 +284,23 @@ std::string from_hex(It begin, It end) {
 
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-template <typename CharT>
+template <basic_char CharT>
+std::string from_hex(std::span<CharT> s) {
+    return from_hex(s.begin(), s.end());
+}
+
+/// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
+/// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
+template <basic_char CharT>
 std::string from_hex(std::basic_string_view<CharT> s) {
     return from_hex(s.begin(), s.end());
 }
+
 inline std::string from_hex(std::string_view s) {
-    return from_hex<>(s);
+    return from_hex(s.begin(), s.end());
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string from_hex(const std::basic_string<CharT>& s) {
     return from_hex(s.begin(), s.end());
 }
@@ -286,12 +315,13 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[N / 2 + 1];  // Includes a null byte so that view().data() is a valid c string
+        static inline constexpr size_t size{N / 2};
+        Char decoded[size + 1];  // Includes a null byte so that span().data() is a valid c string
         bool valid;
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - 1 : 0};
-        }
+
+        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
+
     template <size_t N>
     struct c_hex_literal : hex_literal<char, N> {
         consteval c_hex_literal(const char (&h)[N]) : hex_literal<char, N>{h} {}
@@ -310,19 +340,19 @@ inline namespace literals {
     template <detail::c_hex_literal Hex>
     constexpr std::string_view operator""_hex() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return {Hex.decoded, Hex.size};
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr std::basic_string_view<std::byte> operator""_hex_b() {
+    constexpr auto operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return Hex.span();
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr std::basic_string_view<unsigned char> operator""_hex_u() {
+    constexpr auto operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.view();
+        return Hex.span();
     }
 }  // namespace literals
 

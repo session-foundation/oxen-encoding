@@ -1,3 +1,33 @@
+oxen-encoding (1.2.0-1~deb11) bullseye; urgency=medium
+
+  [ dr7ana ]
+  * move _hex_u and _hex_b to span types
+  * better cspan typdefs, literals implemented, plus namespaced operators
+  * template specialization -> concept
+  * Test-cases implemented, spans are operational
+  * review fixes
+  * formatting, clang-format vbump 15->16
+  * cleaner concept
+  * added clang/llvm-19 CI workflow
+  * dropped append_impl overloads that make libc++19 sad
+  * Made it to mordor (libc++-19)
+
+  [ Jason Rhinelander ]
+  * Move append into append_signature_helper
+
+  [ dr7ana ]
+  * format
+  * consume signature fix
+  * span overloads, added CI lint check
+
+  [ Jason Rhinelander ]
+  * Backwards compatibility fixes
+  * Version bump for char/span changes
+  * Move common bt-specific code into bt_common.h
+  * Fix lint check installed clang-format version to match format.sh
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 11 Dec 2024 20:24:52 -0400
+
 oxen-encoding (1.1.0-3~deb11) bullseye; urgency=medium
 
   * add missing headers to install list

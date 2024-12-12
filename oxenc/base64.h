@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -195,15 +195,22 @@ std::string to_base64_unpadded(It begin, It end) {
 
 /// Creates a base64 string from an iterable, std::string-like object.  The string will have '='
 /// padding, if appropriate.
-template <typename CharT>
+template <basic_char CharT>
 std::string to_base64(std::basic_string_view<CharT> s) {
     return to_base64(s.begin(), s.end());
 }
+
 inline std::string to_base64(std::string_view s) {
     return to_base64<>(s);
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string to_base64(const std::basic_string<CharT>& s) {
+    return to_base64(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+std::string to_base64(std::span<CharT> s) {
     return to_base64(s.begin(), s.end());
 }
 
@@ -261,14 +268,24 @@ constexpr bool is_base64(It begin, It end) {
 }
 
 /// Returns true if the string-like value is a base64 encoded value
-template <typename CharT>
+template <basic_char CharT>
 constexpr bool is_base64(std::basic_string_view<CharT> s) {
     return is_base64(s.begin(), s.end());
 }
+
 constexpr bool is_base64(std::string_view s) {
     return is_base64(s.begin(), s.end());
 }
 
+template <basic_char CharT>
+constexpr bool is_base64(const std::basic_string<CharT>& s) {
+    return is_base64(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+constexpr bool is_base64(std::span<CharT> s) {
+    return is_base64(s.begin(), s.end());
+}
 /// Iterable object for on-the-fly base64 decoding.  Used internally, but also particularly useful
 /// when converting from one encoding to another.  The input range must be a valid base64 encoded
 /// string (with or without padding).
@@ -388,15 +405,22 @@ std::string from_base64(It begin, It end) {
 
 /// Converts base64 digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid base64 characters.
-template <typename CharT>
+template <basic_char CharT>
 std::string from_base64(std::basic_string_view<CharT> s) {
     return from_base64(s.begin(), s.end());
 }
+
 inline std::string from_base64(std::string_view s) {
     return from_base64<>(s);
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string from_base64(const std::basic_string<CharT>& s) {
+    return from_base64(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+std::string from_base64(std::span<CharT> s) {
     return from_base64(s.begin(), s.end());
 }
 
@@ -411,11 +435,12 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[from_base64_size(N - 1) + 1];
+        static inline constexpr size_t size{from_base64_size(N - 1) + 1};
+        Char decoded[size];
+
         uint8_t valid;  // 0 == invalid, otherwise the number of trailing null bytes (1-3)
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - valid : 0};
-        }
+
+        constexpr const_span<const Char> span() const { return {decoded, size - valid}; }
     };
     template <size_t N>
     struct c_b64_literal : b64_literal<char, N> {
@@ -433,21 +458,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b64_literal Base64>
-    constexpr std::string_view operator""_b64() {
+    constexpr auto operator""_b64() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 
     template <detail::b_b64_literal Base64>
-    constexpr std::basic_string_view<std::byte> operator""_b64_b() {
+    constexpr auto operator""_b64_b() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 
     template <detail::u_b64_literal Base64>
-    constexpr std::basic_string_view<unsigned char> operator""_b64_u() {
+    constexpr auto operator""_b64_u() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.view();
+        return Base64.span();
     }
 }  // namespace literals
 

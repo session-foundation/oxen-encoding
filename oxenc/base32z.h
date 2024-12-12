@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "byte_type.h"
-#include "common.h"
+#include "span.h"
 
 namespace oxenc {
 
@@ -151,15 +151,20 @@ std::string to_base32z(It begin, It end) {
 }
 
 /// Creates a base32z string from an iterable, std::string-like object
-template <typename CharT>
+template <basic_char CharT>
 std::string to_base32z(std::basic_string_view<CharT> s) {
     return to_base32z(s.begin(), s.end());
 }
 inline std::string to_base32z(std::string_view s) {
     return to_base32z<>(s);
 }
-template <typename CharT>
+template <basic_char CharT>
 std::string to_base32z(const std::basic_string<CharT>& s) {
+    return to_base32z(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+std::string to_base32z(std::span<CharT> s) {
     return to_base32z(s.begin(), s.end());
 }
 
@@ -199,12 +204,23 @@ constexpr bool is_base32z(It begin, It end) {
 }
 
 /// Returns true if all elements in the string-like value are base32z characters
-template <typename CharT>
+template <basic_char CharT>
 constexpr bool is_base32z(std::basic_string_view<CharT> s) {
     return is_base32z(s.begin(), s.end());
 }
+
 constexpr bool is_base32z(std::string_view s) {
     return is_base32z<>(s);
+}
+
+template <basic_char CharT>
+constexpr bool is_base32z(const std::basic_string<CharT>& s) {
+    return is_base32z(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+constexpr bool is_base32z(std::span<CharT> s) {
+    return is_base32z(s.begin(), s.end());
 }
 
 /// Iterable object for on-the-fly base32z decoding.  Used internally, but also particularly useful
@@ -314,15 +330,22 @@ std::string from_base32z(It begin, It end) {
 
 /// Converts base32z digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid (case-insensitive) base32z characters.
-template <typename CharT>
+template <basic_char CharT>
 std::string from_base32z(std::basic_string_view<CharT> s) {
     return from_base32z(s.begin(), s.end());
 }
+
 inline std::string from_base32z(std::string_view s) {
     return from_base32z<>(s);
 }
-template <typename CharT>
+
+template <basic_char CharT>
 std::string from_base32z(const std::basic_string<CharT>& s) {
+    return from_base32z(s.begin(), s.end());
+}
+
+template <basic_char CharT>
+std::string from_base32z(std::span<CharT> s) {
     return from_base32z(s.begin(), s.end());
 }
 
@@ -336,11 +359,12 @@ namespace detail {
                 *end++ = Char{0};
         }
 
-        Char decoded[from_base32z_size(N - 1) + 1];  // Includes a null byte so that view().data()
-        bool valid;                                  //   is a valid c string
-        constexpr std::basic_string_view<Char> view() const {
-            return {decoded, valid ? sizeof(decoded) - 1 : 0};
-        }
+        static inline constexpr size_t size{from_base32z_size(N - 1)};
+        Char decoded[size + 1];
+
+        bool valid;
+
+        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
     template <size_t N>
     struct c_b32z_literal : b32z_literal<char, N> {
@@ -358,21 +382,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b32z_literal Base32z>
-    constexpr std::string_view operator""_b32z() {
+    constexpr auto operator""_b32z() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 
     template <detail::b_b32z_literal Base32z>
-    constexpr std::basic_string_view<std::byte> operator""_b32z_b() {
+    constexpr auto operator""_b32z_b() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 
     template <detail::u_b32z_literal Base32z>
-    constexpr std::basic_string_view<unsigned char> operator""_b32z_u() {
+    constexpr auto operator""_b32z_u() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.view();
+        return Base32z.span();
     }
 }  // namespace literals
 

@@ -16,7 +16,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(oxenc
-    VERSION 1.1.0
+    VERSION 1.2.0
     DESCRIPTION "oxenc - Base 16/32/64 and Bittorrent Encoding/Decoding Header Only Library"
     LANGUAGES CXX)
 
@@ -82,6 +82,7 @@ if(OXENC_INSTALL)
     oxenc/base32z.h
     oxenc/base64.h
     oxenc/bt.h
+    oxenc/bt_common.h
     oxenc/bt_producer.h
     oxenc/bt_serialize.h
     oxenc/bt_value.h
@@ -91,6 +92,7 @@ if(OXENC_INSTALL)
     oxenc/endian.h
     oxenc/hex.h
     oxenc/rlp_serialize.h
+    oxenc/span.h
     oxenc/variant.h
     ${CMAKE_CURRENT_BINARY_DIR}/oxenc/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenc

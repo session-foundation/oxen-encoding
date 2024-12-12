@@ -17,8 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include "bt_common.h"
 #include "bt_value.h"
-#include "common.h"
+#include "span.h"
 #include "variant.h"
 
 namespace oxenc {
@@ -59,6 +60,8 @@ class bt_deserialize_invalid_type : public bt_deserialize_invalid {
 };
 
 namespace detail {
+    template <typename T>
+    concept consumer_input = const_span_type<T> || char_view_type<T>;
 
     /// Reads digits into an unsigned 64-bit int.
     uint64_t extract_unsigned(std::string_view& s);
@@ -183,6 +186,16 @@ namespace detail {
             std::string_view view;
             bt_deserialize<std::string_view>{}(s, view);
             val = {view.data(), view.size()};
+        }
+    };
+
+    /// const_span specialization
+    template <oxenc::const_span_type T>
+    struct bt_deserialize<T> {
+        void operator()(std::string_view& s, T& val) {
+            std::string_view view;
+            bt_deserialize<std::string_view>{}(s, view);
+            val = {reinterpret_cast<const typename T::value_type*>(view.data()), view.size()};
         }
     };
 
@@ -538,6 +551,13 @@ T bt_deserialize(std::string_view s) {
     return val;
 }
 
+template <typename ReturnT, const_span_type SpanT>
+ReturnT bt_deserialize(SpanT sp) {
+    ReturnT val;
+    bt_deserialize(detail::span_to_sv(sp), val);
+    return val;
+}
+
 /// Deserializes the given value into a generic `bt_value` type (wrapped std::variant) which is
 /// capable of holding all possible BT-encoded values (including recursion).
 ///
@@ -639,8 +659,10 @@ namespace detail {
     T consume_impl(Consumer& c) {
         if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
-        else if constexpr (is_string_like<T>)
+        else if constexpr (string_like<T>)
             return T{c.template consume_string_view<typename T::value_type>()};
+        else if constexpr (const_span_type<T>)
+            return T{c.template consume_span<typename T::value_type>()};
         else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
             return c.template consume_list<T>();
         else if constexpr (std::same_as<T, bt_dict> || bt_output_dict_container<T>)
@@ -666,22 +688,23 @@ class bt_list_consumer {
     bt_list_consumer() = default;
 
     struct load_tag {};
-    bt_list_consumer(std::string_view data, load_tag) : data{data} {}
+
+    bt_list_consumer(const char* input, size_t size, load_tag) : data{input, size} {}
 
   public:
-    bt_list_consumer(std::string_view data_) : bt_list_consumer{data_, load_tag{}} {
+    bt_list_consumer(std::string_view data_) :
+            bt_list_consumer{data_.data(), data_.size(), load_tag{}} {
         if (data.empty())
-            throw std::runtime_error{"Cannot create a bt_list_consumer with an empty string_view"};
+            throw std::runtime_error{"Cannot create a bt_list_consumer with no data"};
         if (data[0] != 'l')
             throw std::runtime_error{"Cannot create a bt_list_consumer with non-list data"};
         data.remove_prefix(1);
     }
-    bt_list_consumer(std::basic_string_view<unsigned char> data) :
+
+    template <detail::consumer_input T>
+    bt_list_consumer(T input) :
             bt_list_consumer{
-                    std::string_view{reinterpret_cast<const char*>(data.data()), data.size()}} {}
-    bt_list_consumer(std::basic_string_view<std::byte> data) :
-            bt_list_consumer{
-                    std::string_view{reinterpret_cast<const char*>(data.data()), data.size()}} {}
+                    std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
 
     /// Copy constructor.  Making a copy copies the current position so can be used for multipass
     /// iteration through a list.
@@ -729,6 +752,19 @@ class bt_list_consumer {
         detail::bt_deserialize<std::string_view>{}(next, result);
         data = next;
         return {reinterpret_cast<const Char*>(result.data()), result.size()};
+    }
+
+    template <basic_char Char = char>
+    const_span<Char> consume_span() {
+        if (data.empty())
+            throw bt_deserialize_invalid{"expected a string, but reached end of data"};
+        else if (!is_string())
+            throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
+        std::string_view next{data};
+        const_span<Char> result;
+        detail::bt_deserialize<const_span<Char>>{}(next, result);
+        data = next;
+        return result;
     }
 
     /// Attempts to parse the next value as an integer (and advance just past it).  Throws if the
@@ -849,37 +885,19 @@ class bt_list_consumer {
     /// caught here (and so propagates back to the consume_signature() caller).
     ///
     /// Does not return a value (if the signature is needed then the callback can copy/store it).
-    template <typename VerifyFunc>
+    template <detail::void_return_func VerifyFunc>
     void consume_signature(VerifyFunc verify) {
-        using Char = std::conditional_t<
-                std::invocable<VerifyFunc, std::string_view&&, std::string_view&&>,
-                char,
-                std::conditional_t<
-                        std::invocable<
-                                VerifyFunc,
-                                std::basic_string_view<unsigned char>&&,
-                                std::basic_string_view<unsigned char>&&>,
-                        unsigned char,
-                        std::conditional_t<
-                                std::invocable<
-                                        VerifyFunc,
-                                        std::basic_string_view<std::byte>&&,
-                                        std::basic_string_view<std::byte>&&>,
-                                std::byte,
-                                void>>>;
-        static_assert(
-                !std::is_void_v<Char>,
-                "consume_signature verify function must take two string_views (or unsigned "
-                "char/std::byte variants)");
-        using SV = std::basic_string_view<Char>;
+        using traits = detail::function_traits<VerifyFunc>;
+        using InputT = typename traits::template argument_type<0>;
+        using CharT = typename InputT::value_type;
 
-        SV message{reinterpret_cast<const Char*>(start), static_cast<size_t>(data.data() - start)};
+        auto msg = InputT{
+                reinterpret_cast<const CharT*>(start), static_cast<size_t>(data.data() - start)};
 
-        static_assert(
-                std::is_void_v<decltype(verify(SV{}, SV{}))>,
-                "consume_signature verify function must not return a value");
-
-        verify(std::move(message), consume_string_view<Char>());
+        if constexpr (std::same_as<std::string_view, InputT>)
+            return verify(std::move(msg), consume_string_view<char>());
+        else
+            return verify(std::move(msg), consume_span<CharT>());
     }
 
     /// Consumes a value without returning it.
@@ -946,22 +964,22 @@ class bt_dict_consumer : private bt_list_consumer {
     }
 
   public:
-    bt_dict_consumer(std::string_view data_) : bt_list_consumer{data_, load_tag{}} {
+    bt_dict_consumer(std::string_view data_) :
+            bt_list_consumer{data_.data(), data_.size(), load_tag{}} {
         if (data.empty())
-            throw std::runtime_error{"Cannot create a bt_dict_consumer with an empty string_view"};
+            throw std::runtime_error{"Cannot create a bt_dict_consumer with an empty string_view "};
         if (data.size() < 2 || data[0] != 'd')
             throw std::runtime_error{"Cannot create a bt_dict_consumer with non-dict data"};
         data.remove_prefix(1);
     }
-    bt_dict_consumer(std::basic_string_view<unsigned char> data) :
-            bt_dict_consumer{
-                    std::string_view{reinterpret_cast<const char*>(data.data()), data.size()}} {}
-    bt_dict_consumer(std::basic_string_view<std::byte> data) :
-            bt_dict_consumer{
-                    std::string_view{reinterpret_cast<const char*>(data.data()), data.size()}} {}
 
-    /// Copy constructor.  Making a copy copies the current position so can be used for multipass
-    /// iteration through a list.
+    template <detail::consumer_input T>
+    bt_dict_consumer(T input) :
+            bt_dict_consumer{
+                    std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
+
+    /// Copy constructor.  Making a copy copies the current position so can be used for
+    /// multipass iteration through a list.
     bt_dict_consumer(const bt_dict_consumer&) = default;
     bt_dict_consumer& operator=(const bt_dict_consumer&) = default;
 
@@ -983,24 +1001,43 @@ class bt_dict_consumer : private bt_list_consumer {
     bool is_list() { return consume_key() && data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
     bool is_dict() { return consume_key() && data.front() == 'd'; }
-    /// Returns the key of the next pair.  This does not have to be called; it is also returned by
-    /// all of the other consume_* methods.  The value is cached whether called here or by some
-    /// other method; accessing it multiple times simple accesses the cache until the next value is
-    /// consumed.
+    /// Returns the key of the next pair.  This does not have to be called; it is also returned
+    /// by all of the other consume_* methods.  The value is cached whether called here or by
+    /// some other method; accessing it multiple times simple accesses the cache until the next
+    /// value is consumed.
     std::string_view key() {
         if (!consume_key())
             throw bt_deserialize_invalid{"Cannot access next key: at the end of the dict"};
         return key_;
     }
 
-    /// Attempt to parse the next value as a string->string pair (and advance just past it).  Throws
-    /// if the next value is not a string.
+    template <basic_char T>
+    const_span<T> key_span() {
+        if (!consume_key())
+            throw bt_deserialize_invalid{"Cannot access next key: at the end of the dict"};
+        return const_span<T>{reinterpret_cast<const T*>(key_.data()), key_.size()};
+    }
+
+    /// Attempt to parse the next value as a string->string pair (and advance just past it).
+    /// Throws if the next value is not a string.
     template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_string() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
         std::pair<std::string_view, std::basic_string_view<Char>> ret;
         ret.second = bt_list_consumer::consume_string_view<Char>();
+        ret.first = flush_key();
+        return ret;
+    }
+
+    /// Attempt to parse the next value as a string->span pair (and advance just past it).
+    /// Throws if the next value is not a const_span
+    template <typename Char = char>
+    std::pair<std::string_view, const_span<Char>> next_span() {
+        if (!is_string())
+            throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
+        std::pair<std::string_view, const_span<Char>> ret;
+        ret.second = bt_list_consumer::consume_span<Char>();
         ret.first = flush_key();
         return ret;
     }
@@ -1018,9 +1055,9 @@ class bt_dict_consumer : private bt_list_consumer {
     }
 
     /// Consumes a string->list pair, return it as a list-like type.  This typically requires
-    /// dynamic allocation, but only has to parse the data once.  Compare with consume_list_data()
-    /// which allows alloc-free traversal, but requires parsing twice (if the contents are to be
-    /// used).
+    /// dynamic allocation, but only has to parse the data once.  Compare with
+    /// consume_list_data() which allows alloc-free traversal, but requires parsing twice (if
+    /// the contents are to be used).
     template <typename T = bt_list>
     std::pair<std::string_view, T> next_list() {
         std::pair<std::string_view, T> pair;
@@ -1038,9 +1075,9 @@ class bt_dict_consumer : private bt_list_consumer {
     }
 
     /// Consumes a string->dict pair, return it as a dict-like type.  This typically requires
-    /// dynamic allocation, but only has to parse the data once.  Compare with consume_dict_data()
-    /// which allows alloc-free traversal, but requires parsing twice (if the contents are to be
-    /// used).
+    /// dynamic allocation, but only has to parse the data once.  Compare with
+    /// consume_dict_data() which allows alloc-free traversal, but requires parsing twice (if
+    /// the contents are to be used).
     template <typename T = bt_dict>
     std::pair<std::string_view, T> next_dict() {
         std::pair<std::string_view, T> pair;
@@ -1059,8 +1096,9 @@ class bt_dict_consumer : private bt_list_consumer {
 
     /// Attempts to parse the next value as a string->list pair and returns the string_view that
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
-    /// quite inefficient for large, nested structures (unless the values only need to be skipped
-    /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
+    /// quite inefficient for large, nested structures (unless the values only need to be
+    /// skipped but aren't separately needed).  This, however, does not require dynamic memory
+    /// allocation.
     template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_list_data() {
         if (data.size() < 2 || !is_list())
@@ -1073,8 +1111,9 @@ class bt_dict_consumer : private bt_list_consumer {
 
     /// Attempts to parse the next value as a string->dict pair and returns the string_view that
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
-    /// quite inefficient for large, nested structures (unless the values only need to be skipped
-    /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
+    /// quite inefficient for large, nested structures (unless the values only need to be
+    /// skipped but aren't separately needed).  This, however, does not require dynamic memory
+    /// allocation.
     template <basic_char Char = char>
     std::pair<std::string_view, std::basic_string_view<Char>> next_dict_data() {
         if (data.size() < 2 || !is_dict())
@@ -1090,34 +1129,35 @@ class bt_dict_consumer : private bt_list_consumer {
     /// values:
     ///
     /// - the key (std::string_view)
-    /// - the message that is allegedly signed, consisting of all (so-far) consumed data from the
-    /// dict
+    /// - the message that is allegedly signed, consisting of all (so-far) consumed data from
+    /// the dict
     /// - the signature value
     ///
     /// Verification of the signature is up to the caller.  See also consume_signature().
     ///
-    /// The latter two are std::string_views by default, but a `Char` template type can be provided
-    /// to return them as some other basic_string_view<Char>.
-    template <typename Char = char>
+    /// The latter two are std::string_views by default, but a `Char` template type can be
+    /// provided to return them as some other basic_string_view<Char>.
+    template <basic_char Char = char>
     std::tuple<std::string_view, std::basic_string_view<Char>, std::basic_string_view<Char>>
-    next_signature() {
+    next_signature_view() {
         std::tuple<std::string_view, std::basic_string_view<Char>, std::basic_string_view<Char>>
                 ret;
         auto& [k, msg, sig] = ret;
         // Figuring out `msg` gets a little complicated.
         //
         // It would be easier if we knew that the key hadn't yet been consumed, because then we
-        // could just get the message from `start` to our current position, but we have no guarantee
-        // of that (because the user might have called something like is_string() that has already
-        // consumed the key), so we can't rely on it and we have to back up over what the encoded
-        // key size would have been.
+        // could just get the message from `start` to our current position, but we have no
+        // guarantee of that (because the user might have called something like is_string() that
+        // has already consumed the key), so we can't rely on it and we have to back up over
+        // what the encoded key size would have been.
         //
         // So start out by always getting the key so we have only one case to deal with:
         k = key();
 
-        // What we need for msg is from `start` and ending at the beginning of `LMN:somekey`, where
-        // LMN is some base-10 integer, but `data.data()` currently points at the *end* of that
-        // value.  So first we can back up over the key value itself, the `:`, and the last digit
+        // What we need for msg is from `start` and ending at the beginning of `LMN:somekey`,
+        // where LMN is some base-10 integer, but `data.data()` currently points at the *end* of
+        // that value.  So first we can back up over the key value itself, the `:`, and the last
+        // digit
         // (`N`):
         const char* msgend = data.data() - k.size() - 2;
 
@@ -1131,19 +1171,39 @@ class bt_dict_consumer : private bt_list_consumer {
         return ret;
     }
 
+    template <basic_char CharT = char>
+    std::tuple<const_span<CharT>, const_span<CharT>, const_span<CharT>> next_signature_span() {
+        std::tuple<const_span<CharT>, const_span<CharT>, const_span<CharT>> ret;
+        auto& [k, msg, sig] = ret;
+
+        k = key_span<CharT>();
+
+        const char* msgend = data.data() - k.size() - 2;
+
+        for (size_t x = k.size(); x >= 10; x /= 10)
+            msgend--;
+
+        msg = {reinterpret_cast<const CharT*>(start), static_cast<size_t>(msgend - start)};
+        sig = consume_span<CharT>();
+
+        return ret;
+    }
+
     /// Skips ahead until we find the first key >= the given key or reach the end of the dict.
-    /// Returns true if we found an exact match, false if we reached some greater value or the end.
-    /// If we didn't hit the end, the next `consumer_*()` call will return the key-value pair we
-    /// found (either the exact match or the first key greater than the requested key).
+    /// Returns true if we found an exact match, false if we reached some greater value or the
+    /// end. If we didn't hit the end, the next `consumer_*()` call will return the key-value
+    /// pair we found (either the exact match or the first key greater than the requested key).
     ///
     /// Two important notes:
     ///
-    /// - properly encoded bt dicts must have lexicographically sorted keys, and this method assumes
-    ///   that the input is correctly sorted (and thus if we find a greater value then your key does
-    ///   not exist).
-    /// - this is irreversible; you cannot returned to skipped values without reparsing.  (You *can*
-    ///   however, make a copy of the bt_dict_consumer before calling and use the copy to return to
-    ///   the pre-skipped position).
+    /// - properly encoded bt dicts must have lexicographically sorted keys, and this method
+    /// assumes
+    ///   that the input is correctly sorted (and thus if we find a greater value then your key
+    ///   does not exist).
+    /// - this is irreversible; you cannot returned to skipped values without reparsing.  (You
+    /// *can*
+    ///   however, make a copy of the bt_dict_consumer before calling and use the copy to return
+    ///   to the pre-skipped position).
     bool skip_until(std::string_view find) {
         while (consume_key() && key_ < find) {
             flush_key();
@@ -1152,24 +1212,27 @@ class bt_dict_consumer : private bt_list_consumer {
         return key_ == find;
     }
 
-    /// This functions nearly identically to skip_until; it will return if we found an exact match
-    /// but will throw if the key is not found. If we didn't throw, the next `consumer_*()` call
-    /// will return the key-value pair we found.
+    /// This functions nearly identically to skip_until; it will return if we found an exact
+    /// match but will throw if the key is not found. If we didn't throw, the next
+    /// `consumer_*()` call will return the key-value pair we found.
     ///
     /// Two important notes:
     ///
-    /// - properly encoded bt dicts must have lexicographically sorted keys, and this method assumes
-    ///   that the input is correctly sorted (and thus if we find a greater value then your key does
-    ///   not exist).
-    /// - this is irreversible; you cannot returned to skipped values without reparsing.  (You *can*
-    ///   however, make a copy of the bt_dict_consumer before calling and use the copy to return to
-    ///   the pre-skipped position).
+    /// - properly encoded bt dicts must have lexicographically sorted keys, and this method
+    /// assumes
+    ///   that the input is correctly sorted (and thus if we find a greater value then your key
+    ///   does not exist).
+    /// - this is irreversible; you cannot returned to skipped values without reparsing.  (You
+    /// *can*
+    ///   however, make a copy of the bt_dict_consumer before calling and use the copy to return
+    ///   to the pre-skipped position).
     void required(std::string_view find) {
         if (!skip_until(find))
             throw std::out_of_range{"Key " + std::string{find} + " not found!"};
     }
 
-    /// The `consume_*` functions are wrappers around next_whatever that discard the returned key.
+    /// The `consume_*` functions are wrappers around next_whatever that discard the returned
+    /// key.
     ///
     /// Intended for use with skip_until such as:
     ///
@@ -1177,6 +1240,11 @@ class bt_dict_consumer : private bt_list_consumer {
     ///     if (d.skip_until("key"))
     ///         value = d.consume_string();
     ///
+
+    template <typename Char = char>
+    auto consume_span() {
+        return next_span<Char>().second;
+    }
 
     template <basic_char Char = char>
     auto consume_string_view() {
@@ -1226,83 +1294,70 @@ class bt_dict_consumer : private bt_list_consumer {
     /// Shortcut for wrapping `consume_dict_data()` in a new dict consumer
     bt_dict_consumer consume_dict_consumer() { return consume_dict_data(); }
 
-    /// Consumes and verifies a signature.  This method, unlike the above consume_ functions, is a
-    /// little different from its `next_signature` counterpart: it returns nothing, but takes a
-    /// verification function to call with the expected message data and signature.  The VerifyFunc
-    /// should take two arguments, such as:
+    /// Consumes and verifies a signature.  This method, unlike the above consume_ functions, is
+    /// a little different from its `next_signature` counterpart: it returns nothing, but takes
+    /// a verification function to call with the expected message data and signature.  The
+    /// VerifyFunc should take two arguments, such as:
     ///
     ///     void verifier(std::string_view msg, std::string_view sig);
     ///     void verifier(std::basic_string_view<Char> msg, std::basic_string_view<Char> sig);
     ///
     /// with allowed `Char` types of `char`, `unsigned char` or `std::byte`.
     ///
-    /// The first paramter is the allegedly signed message (i.e. already-consumed dict data), and
-    /// the second argument is the signature.
+    /// The first paramter is the allegedly signed message (i.e. already-consumed dict data),
+    /// and the second argument is the signature.
     ///
     /// The VerifyFunc return value must be void; non-void returning functions are explicitly
-    /// disallowed to prevent accidentally passing a bool-return verification function.  The verify
-    /// function may throw if desired (the exception is not caught and will propagate back to the
-    /// consume_signature() caller).
+    /// disallowed to prevent accidentally passing a bool-return verification function.  The
+    /// verify function may throw if desired (the exception is not caught and will propagate
+    /// back to the consume_signature() caller).
     ///
     /// Does not return a value (if the signature needs to be stored then the callback can
     /// copy/store it).
-    template <typename VerifyFunc>
+    template <detail::void_return_func VerifyFunc>
     void consume_signature(VerifyFunc verify) {
-        using Char = std::conditional_t<
-                std::invocable<VerifyFunc, std::string_view, std::string_view>,
-                char,
-                std::conditional_t<
-                        std::invocable<
-                                VerifyFunc,
-                                std::basic_string_view<unsigned char>,
-                                std::basic_string_view<unsigned char>>,
-                        unsigned char,
-                        std::conditional_t<
-                                std::invocable<
-                                        VerifyFunc,
-                                        std::basic_string_view<std::byte>,
-                                        std::basic_string_view<std::byte>>,
-                                std::byte,
-                                void>>>;
-        static_assert(
-                !std::is_void_v<Char>,
-                "consume_signature verify function must take two string_views (or unsigned "
-                "char/std::byte variants)");
-        auto [key, msg, sig] = next_signature<Char>();
-        static_assert(
-                std::is_void_v<decltype(verify(msg, sig))>,
-                "consume_signature verify function must not return a value");
-        verify(msg, sig);
+        using traits = detail::function_traits<VerifyFunc>;
+        using InputT = typename traits::template argument_type<0>;
+        using CharT = typename InputT::value_type;
+
+        if constexpr (detail::char_view_type<InputT>) {
+            auto [k, msg, sig] = next_signature_view<CharT>();
+            verify(std::move(msg), std::move(sig));
+        } else {
+            static_assert(detail::const_span_type<InputT>);
+            auto [k, msg, sig] = next_signature_span<CharT>();
+            verify(std::move(msg), std::move(sig));
+        }
     }
 
-    /// Consumes a value into the given type (string_view, string, integer, bt_dict_consumer, etc.).
-    /// This is a shortcut for calling consume_string, consume_integer, etc. based on the templated
-    /// type.
+    /// Consumes a value into the given type (string_view, string, integer, bt_dict_consumer,
+    /// etc.). This is a shortcut for calling consume_string, consume_integer, etc. based on the
+    /// templated type.
     template <typename T>
     T consume() {
         return detail::consume_impl<T>(*this);
     }
 
-    /// Advances to and requires the given key (as if by calling `required()`) and then throws if
-    /// the key was not found; otherwise returns the value parsed into the given type.
+    /// Advances to and requires the given key (as if by calling `required()`) and then throws
+    /// if the key was not found; otherwise returns the value parsed into the given type.
     template <typename T>
     T require(std::string_view key) {
         required(key);
         return consume<T>();
     }
 
-    /// Advances to and requires the given key (as if by calling `required()`) and then throws if
-    /// the key was not found; otherwise calls consume_signature() with the given verification
-    /// function to verify the signature value against the prior dict data.
-    template <typename VerifyFunc>
+    /// Advances to and requires the given key (as if by calling `required()`) and then throws
+    /// if the key was not found; otherwise calls consume_signature() with the given
+    /// verification function to verify the signature value against the prior dict data.
+    template <detail::void_return_func VerifyFunc>
     void require_signature(std::string_view key, VerifyFunc&& verify) {
         required(key);
         return consume_signature(std::forward<VerifyFunc>(verify));
     }
 
-    /// Advances to a given key (as if by calling `skip_until`) and then returns std::nullopt if the
-    /// key was not found; otherwise returns the value parsed into the given type.  Note that this
-    /// will still throw if the key exists but has an incompatible value (e.g. calling
+    /// Advances to a given key (as if by calling `skip_until`) and then returns std::nullopt if
+    /// the key was not found; otherwise returns the value parsed into the given type.  Note
+    /// that this will still throw if the key exists but has an incompatible value (e.g. calling
     /// `d.maybe<int>("x")` when the value at "x" is a string).
     template <typename T>
     std::optional<T> maybe(std::string_view key) {
@@ -1312,12 +1367,12 @@ class bt_dict_consumer : private bt_list_consumer {
     }
 
     /// Finishes reading the dict by reading through (and ignoring) any remaining keys until it
-    /// reaches the end of the dict, and confirms that the end of the dict is in fact the end of the
-    /// input.  Will throw if anything doesn't parse, or if the dict terminates but *isn't* at the
-    /// end of the buffer being parsed.
+    /// reaches the end of the dict, and confirms that the end of the dict is in fact the end of
+    /// the input.  Will throw if anything doesn't parse, or if the dict terminates but *isn't*
+    /// at the end of the buffer being parsed.
     ///
-    /// It is not required to call this, but not calling it will not notice if there is invalid data
-    /// later in the dict or after the end of the dict.
+    /// It is not required to call this, but not calling it will not notice if there is invalid
+    /// data later in the dict or after the end of the dict.
     void finish() {
         while (!is_finished()) {
             flush_key();
@@ -1375,10 +1430,10 @@ namespace detail {
         s.remove_prefix(len);
     }
 
-    // Check that we are on a 2's complement architecture.  It's highly unlikely that this code ever
-    // runs on a non-2s-complement architecture (especially since C++20 requires a two's complement
-    // signed value behaviour), but check at compile time anyway because we rely on these relations
-    // below.
+    // Check that we are on a 2's complement architecture.  It's highly unlikely that this code
+    // ever runs on a non-2s-complement architecture (especially since C++20 requires a two's
+    // complement signed value behaviour), but check at compile time anyway because we rely on
+    // these relations below.
     static_assert(
             std::numeric_limits<int64_t>::min() + std::numeric_limits<int64_t>::max() == -1 &&
                     static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + uint64_t{1} ==
@@ -1402,7 +1457,8 @@ namespace detail {
             val.u64 = extract_unsigned(s);
             if (val.u64 > (uint64_t{1} << 63))
                 throw bt_deserialize_invalid(
-                        "Deserialization of integer failed: negative integer value is too large "
+                        "Deserialization of integer failed: negative integer value is too "
+                        "large "
                         "for a 64-bit signed int");
             val.i64 = -static_cast<int64_t>(val.u64);
         } else {
@@ -1411,7 +1467,8 @@ namespace detail {
 
         if (s.empty())
             throw bt_deserialize_invalid(
-                    "Integer deserialization failed: encountered end of string before integer was "
+                    "Integer deserialization failed: encountered end of string before integer "
+                    "was "
                     "finished");
         if (s[0] != 'e')
             throw bt_deserialize_invalid(
@@ -1428,7 +1485,8 @@ namespace detail {
     inline void bt_deserialize<bt_value>::operator()(std::string_view& s, bt_value& val) {
         if (s.size() < 2)
             throw bt_deserialize_invalid(
-                    "Deserialization failed: end of string found where bt-encoded value expected");
+                    "Deserialization failed: end of string found where bt-encoded value "
+                    "expected");
 
         switch (s[0]) {
             case 'd': {

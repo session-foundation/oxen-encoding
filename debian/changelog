@@ -1,4 +1,4 @@
-oxen-encoding (1.2.0-1~ubuntu2404) noble; urgency=medium
+oxen-encoding (1.2.0-1~ubuntu2410) oracular; urgency=medium
 
   [ dr7ana ]
   * move _hex_u and _hex_b to span types

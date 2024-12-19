@@ -10,23 +10,20 @@
 #if defined(_MSC_VER) && (!defined(__clang__) || defined(__c2__))
 #include <cstdlib>
 
-#define bswap_16(x) _byteswap_ushort(x)
-#define bswap_32(x) _byteswap_ulong(x)
-#define bswap_64(x) _byteswap_uint64(x)
-#elif defined(__clang__) || defined(__GNUC__)
-#define bswap_16(x) __builtin_bswap16(x)
-#define bswap_32(x) __builtin_bswap32(x)
-#define bswap_64(x) __builtin_bswap64(x)
-#elif defined(__linux__)
+#elif !(defined(__clang__) || defined(__GNUC__))
+#if defined(__linux__)
 extern "C" {
 #include <byteswap.h>
 }  // extern "C"
+
 #else
-#error "Don't know how to byteswap on this platform!"
+#include <algorithm>
+
+#endif
 #endif
 
 namespace oxenc {
-#if defined(__cpp_lib_bit_cast)
+#ifdef __cpp_lib_bit_cast
 using std::bit_cast;
 #else
 template <class To, class From>
@@ -40,6 +37,32 @@ inline constexpr To bit_cast(const From& from) {
     return storage;
 }
 #endif
+
+#if defined(_MSC_VER) && (!defined(__clang__) || defined(__c2__))
+#define bswap_16(x) _byteswap_ushort(x)
+#define bswap_32(x) _byteswap_ulong(x)
+#define bswap_64(x) _byteswap_uint64(x)
+
+#elif defined(__clang__) || defined(__GNUC__)
+#define bswap_16(x) __builtin_bswap16(x)
+#define bswap_32(x) __builtin_bswap32(x)
+#define bswap_64(x) __builtin_bswap64(x)
+
+#elif !defined(__linux__)
+template <std::integral T>
+    requires std::has_unique_object_representations_v<T>
+inline constexpr T byteswap(T val) noexcept {
+    auto value = bit_cast<std::array<std::byte, sizeof(T)>>(val);
+    std::ranges::reverse(value);
+    return bit_cast<T>(value);
+}
+
+#define bswap_16(x) byteswap<uint16_t>(x)
+#define bswap_32(x) byteswap<uint32_t>(x)
+#define bswap_64(x) byteswap<uint64_t>(x)
+
+#endif
+
 /// True if this is a little-endian platform
 inline constexpr bool little_endian = std::endian::native == std::endian::little;
 
@@ -138,11 +161,6 @@ T load_little_to_host(const void* from) {
     return val;
 }
 
-template <endian_swappable_integer T>
-constexpr T load_little_to_host(const T* from) {
-    return little_to_host(*from);
-}
-
 /// Loads a little-endian integer value from a memory location containing host order bytes.
 /// (There is no alignment requirement on the given pointer address).
 template <endian_swappable_integer T>
@@ -151,11 +169,6 @@ T load_host_to_little(const void* from) {
     std::memcpy(&val, from, sizeof(T));
     host_to_little_inplace(val);
     return val;
-}
-
-template <endian_swappable_integer T>
-constexpr T load_host_to_little(const T* from) {
-    return host_to_little(*from);
 }
 
 /// Loads a host-order integer value from a memory location containing big-endian bytes.  (There
@@ -168,11 +181,6 @@ T load_big_to_host(const void* from) {
     return val;
 }
 
-template <endian_swappable_integer T>
-constexpr T load_big_to_host(const T* from) {
-    return big_to_host(*from);
-}
-
 /// Loads a big-endian integer value from a memory location containing host order bytes.  (There
 /// is no alignment requirement on the given pointer address).
 template <endian_swappable_integer T>
@@ -181,11 +189,6 @@ T load_host_to_big(const void* from) {
     std::memcpy(&val, from, sizeof(T));
     host_to_big_inplace(val);
     return val;
-}
-
-template <endian_swappable_integer T>
-constexpr T load_host_to_big(const T* from) {
-    return host_to_big(*from);
 }
 
 /// Writes a little-endian integer value into the given memory location, copying and converting

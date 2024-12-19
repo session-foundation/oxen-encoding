@@ -657,7 +657,7 @@ class bt_dict_producer : bt_list_producer {
     /// Appends a key-value pair with a string or integer value.  The key must be > than the last
     /// key added, but this is only enforced (with an assertion) in debug builds.
     template <typename T>
-    requires const_span_convertible<T> || std::integral<T>
+        requires const_span_convertible<T> || std::integral<T>
     void append(std::string_view key, const T& value) {
         if (has_child)
             throw std::logic_error{"Cannot append to list when a sublist is active"};

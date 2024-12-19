@@ -4,6 +4,8 @@
 #include <concepts>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <utility>
 
 #if defined(_MSC_VER) && (!defined(__clang__) || defined(__c2__))
 #include <cstdlib>
@@ -24,7 +26,20 @@ extern "C" {
 #endif
 
 namespace oxenc {
-
+#if defined(__cpp_lib_bit_cast)
+using std::bit_cast;
+#else
+template <class To, class From>
+    requires(
+            sizeof(To) == sizeof(From) && std::is_trivially_copyable<To>::value &&
+            std::is_trivially_copyable<From>::value && std::is_trivially_constructible<To>::value &&
+            std::is_trivially_constructible<From>::value)
+inline constexpr To bit_cast(const From& from) {
+    To storage{};
+    std::construct_at(std::launder(&storage), from);
+    return storage;
+}
+#endif
 /// True if this is a little-endian platform
 inline constexpr bool little_endian = std::endian::native == std::endian::little;
 
@@ -40,19 +55,19 @@ concept endian_swappable_integer =
 /// Byte swaps an integer value unconditionally.  You usually want to use one of the other
 /// endian-aware functions rather than this.
 template <endian_swappable_integer T>
-void byteswap_inplace(T& val) {
+constexpr void byteswap_inplace(T& val) {
     if constexpr (sizeof(T) == 2)
-        val = static_cast<T>(bswap_16(static_cast<uint16_t>(val)));
+        val = bit_cast<T>(bswap_16(bit_cast<uint16_t>(val)));
     else if constexpr (sizeof(T) == 4)
-        val = static_cast<T>(bswap_32(static_cast<uint32_t>(val)));
+        val = bit_cast<T>(bswap_32(bit_cast<uint32_t>(val)));
     else if constexpr (sizeof(T) == 8)
-        val = static_cast<T>(bswap_64(static_cast<uint64_t>(val)));
+        val = bit_cast<T>(bswap_64(bit_cast<uint64_t>(val)));
 }
 
 /// Converts a host-order integer value into a little-endian value, mutating it.  Does nothing
 /// on little-endian platforms.
 template <endian_swappable_integer T>
-void host_to_little_inplace(T& val) {
+constexpr void host_to_little_inplace(T& val) {
     if constexpr (!little_endian)
         byteswap_inplace(val);
 }
@@ -60,7 +75,7 @@ void host_to_little_inplace(T& val) {
 /// Converts a host-order integer value into a little-endian value, returning it.  Does no
 /// converstion on little-endian platforms.
 template <endian_swappable_integer T>
-T host_to_little(T val) {
+constexpr T host_to_little(T val) {
     host_to_little_inplace(val);
     return val;
 }
@@ -68,7 +83,7 @@ T host_to_little(T val) {
 /// Converts a little-endian integer value into a host-order (native) integer value, mutating
 /// it.  Does nothing on little-endian platforms.
 template <endian_swappable_integer T>
-void little_to_host_inplace(T& val) {
+constexpr void little_to_host_inplace(T& val) {
     if constexpr (!little_endian)
         byteswap_inplace(val);
 }
@@ -76,7 +91,7 @@ void little_to_host_inplace(T& val) {
 /// Converts a little-order integer value into a host-order (native) integer value, returning
 /// it.  Does no conversion on little-endian platforms.
 template <endian_swappable_integer T>
-T little_to_host(T val) {
+constexpr T little_to_host(T val) {
     little_to_host_inplace(val);
     return val;
 }
@@ -84,7 +99,7 @@ T little_to_host(T val) {
 /// Converts a host-order integer value into a big-endian value, mutating it.  Does nothing on
 /// big-endian platforms.
 template <endian_swappable_integer T>
-void host_to_big_inplace(T& val) {
+constexpr void host_to_big_inplace(T& val) {
     if constexpr (!big_endian)
         byteswap_inplace(val);
 }
@@ -92,7 +107,7 @@ void host_to_big_inplace(T& val) {
 /// Converts a host-order integer value into a big-endian value, returning it.  Does no
 /// conversion on big-endian platforms.
 template <endian_swappable_integer T>
-T host_to_big(T val) {
+constexpr T host_to_big(T val) {
     host_to_big_inplace(val);
     return val;
 }
@@ -100,7 +115,7 @@ T host_to_big(T val) {
 /// Converts a big-endian value into a host-order (native) integer value, mutating it.  Does
 /// nothing on big-endian platforms.
 template <endian_swappable_integer T>
-void big_to_host_inplace(T& val) {
+constexpr void big_to_host_inplace(T& val) {
     if constexpr (!big_endian)
         byteswap_inplace(val);
 }
@@ -108,7 +123,7 @@ void big_to_host_inplace(T& val) {
 /// Converts a big-order integer value into a host-order (native) integer value, returning it.
 /// Does no conversion on big-endian platforms.
 template <endian_swappable_integer T>
-T big_to_host(T val) {
+constexpr T big_to_host(T val) {
     big_to_host_inplace(val);
     return val;
 }
@@ -123,6 +138,11 @@ T load_little_to_host(const void* from) {
     return val;
 }
 
+template <endian_swappable_integer T>
+constexpr T load_little_to_host(const T* from) {
+    return little_to_host(*from);
+}
+
 /// Loads a little-endian integer value from a memory location containing host order bytes.
 /// (There is no alignment requirement on the given pointer address).
 template <endian_swappable_integer T>
@@ -131,6 +151,11 @@ T load_host_to_little(const void* from) {
     std::memcpy(&val, from, sizeof(T));
     host_to_little_inplace(val);
     return val;
+}
+
+template <endian_swappable_integer T>
+constexpr T load_host_to_little(const T* from) {
+    return host_to_little(*from);
 }
 
 /// Loads a host-order integer value from a memory location containing big-endian bytes.  (There
@@ -143,6 +168,11 @@ T load_big_to_host(const void* from) {
     return val;
 }
 
+template <endian_swappable_integer T>
+constexpr T load_big_to_host(const T* from) {
+    return big_to_host(*from);
+}
+
 /// Loads a big-endian integer value from a memory location containing host order bytes.  (There
 /// is no alignment requirement on the given pointer address).
 template <endian_swappable_integer T>
@@ -153,12 +183,22 @@ T load_host_to_big(const void* from) {
     return val;
 }
 
+template <endian_swappable_integer T>
+constexpr T load_host_to_big(const T* from) {
+    return host_to_big(*from);
+}
+
 /// Writes a little-endian integer value into the given memory location, copying and converting
 /// it (if necessary) from the given host-order integer value.
 template <endian_swappable_integer T>
 void write_host_as_little(T val, void* to) {
     host_to_little_inplace(val);
     std::memcpy(to, &val, sizeof(T));
+}
+
+template <endian_swappable_integer T>
+constexpr void write_host_as_little(T val, T* to) {
+    to = host_to_little(val);
 }
 
 /// Writes a big-endian integer value into the given memory location, copying and converting it
@@ -169,6 +209,11 @@ void write_host_as_big(T val, void* to) {
     std::memcpy(to, &val, sizeof(T));
 }
 
+template <endian_swappable_integer T>
+constexpr void write_host_as_big(T val, T* to) {
+    to = host_to_big(val);
+}
+
 /// Writes a host-order integer value into the given memory location, copying and converting it
 /// (if necessary) from the given little-endian integer value.
 template <endian_swappable_integer T>
@@ -177,12 +222,22 @@ void write_little_as_host(T val, void* to) {
     std::memcpy(to, &val, sizeof(T));
 }
 
+template <endian_swappable_integer T>
+constexpr void little_to_host_inplace(T val, T* to) {
+    to = little_to_host(val);
+}
+
 /// Writes a host-order integer value into the given memory location, copying and converting it
 /// (if necessary) from the given big-endian integer value.
 template <endian_swappable_integer T>
 void write_big_as_host(T val, void* to) {
     big_to_host_inplace(val);
     std::memcpy(to, &val, sizeof(T));
+}
+
+template <endian_swappable_integer T>
+constexpr void write_big_as_host(T val, T* to) {
+    to = big_to_host(val);
 }
 
 }  // namespace oxenc

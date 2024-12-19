@@ -103,7 +103,7 @@ namespace detail {
 
     /// Integer specializations
     template <typename T>
-    requires std::integral<T>
+        requires std::integral<T>
     struct bt_serialize<T> {
         static_assert(
                 sizeof(T) <= sizeof(uint64_t),
@@ -120,7 +120,7 @@ namespace detail {
     };
 
     template <typename T>
-    requires std::integral<T>
+        requires std::integral<T>
     struct bt_deserialize<T> {
         void operator()(std::string_view& s, T& val) {
             constexpr uint64_t umax = static_cast<uint64_t>(std::numeric_limits<T>::max());
@@ -420,7 +420,7 @@ namespace detail {
     };
 
     template <typename Variant, typename T, typename... Ts>
-    requires(!bt_deserializable<T>)
+        requires(!bt_deserializable<T>)
     struct bt_deserialize_try_variant_impl<Variant, T, Ts...> {
         void operator()(std::string_view& s, Variant& variant) {
             // Unsupported deserialization type, skip it
@@ -530,7 +530,7 @@ std::string bt_serialize(const T& val) {
 /// successfully but the parsed string still has remaining content.
 ///
 template <typename T>
-requires(!std::is_const_v<T>)
+    requires(!std::is_const_v<T>)
 void bt_deserialize(std::string_view s, T& val) {
     detail::bt_deserialize<T>{}(s, val);
     if (!s.empty())

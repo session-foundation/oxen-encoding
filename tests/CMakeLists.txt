@@ -21,3 +21,6 @@ target_link_libraries(tests Catch2::Catch2 oxenc)
 
 add_custom_target(check COMMAND tests)
 
+if (OXENC_BUILD_ENDIAN_SPEEDTEST)
+    add_executable(endian-testing endian-testing.cpp)
+endif()

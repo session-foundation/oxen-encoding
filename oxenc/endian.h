@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <bit>
 #include <concepts>
 #include <cstdint>
@@ -7,14 +8,10 @@
 #include <memory>
 #include <utility>
 
-#if defined(_MSC_VER) && (!defined(__clang__) || defined(__c2__))
-#include <cstdlib>
+#if !(defined(__clang__) || defined(__GNUC__))
 
-#elif !(defined(__clang__) || defined(__GNUC__))
-#if defined(__linux__)
-extern "C" {
-#include <byteswap.h>
-}  // extern "C"
+#if defined(_MSC_VER)
+#include <cstdlib>
 
 #else
 #include <algorithm>
@@ -31,30 +28,44 @@ template <class To, class From>
             sizeof(To) == sizeof(From) && std::is_trivially_copyable<To>::value &&
             std::is_trivially_copyable<From>::value && std::is_trivially_constructible<To>::value &&
             std::is_trivially_constructible<From>::value)
-inline constexpr To bit_cast(const From& from) {
+[[nodiscard]] inline constexpr To bit_cast(const From& from) noexcept {
     To storage{};
     std::construct_at(std::launder(&storage), from);
     return storage;
 }
 #endif
 
-#if defined(_MSC_VER) && (!defined(__clang__) || defined(__c2__))
-#define bswap_16(x) _byteswap_ushort(x)
-#define bswap_32(x) _byteswap_ulong(x)
-#define bswap_64(x) _byteswap_uint64(x)
-
-#elif defined(__clang__) || defined(__GNUC__)
+#if defined(__clang__) || defined(__GNUC__)
 #define bswap_16(x) __builtin_bswap16(x)
 #define bswap_32(x) __builtin_bswap32(x)
 #define bswap_64(x) __builtin_bswap64(x)
 
-#elif !defined(__linux__)
+#else  //  MSVC and other weird compiler choices
 template <std::integral T>
-    requires std::has_unique_object_representations_v<T>
-inline constexpr T byteswap(T val) noexcept {
-    auto value = bit_cast<std::array<std::byte, sizeof(T)>>(val);
-    std::ranges::reverse(value);
-    return bit_cast<T>(value);
+    requires std::has_unique_object_representations_v<T> && std::is_unsigned_v<T>
+[[nodiscard]] inline constexpr T byteswap(T val) noexcept {
+    if (std::is_constant_evaluated()) {
+        auto value = bit_cast<std::array<std::byte, sizeof(T)>>(val);
+        std::ranges::reverse(value);
+        return bit_cast<T>(value);
+    }
+
+    // fallback implementation
+    size_t diff = CHAR_BIT * (sizeof(T) - 1);
+
+    T m1 = UCHAR_MAX;
+    T m2 = (T)(m1 << diff);
+    T v = val;
+
+    for (size_t i = 0; i < sizeof(T) / 2; ++i) {
+        T b1 = v & m1, b2 = v & m2;
+        v = (T)(v ^ b1 ^ b2 ^ (b1 << diff) ^ (b2 >> diff));
+        m1 <<= CHAR_BIT;
+        m2 >>= CHAR_BIT;
+        diff -= 2 * CHAR_BIT;
+    }
+
+    return v;
 }
 
 #define bswap_16(x) byteswap<uint16_t>(x)

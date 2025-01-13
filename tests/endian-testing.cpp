@@ -4,26 +4,30 @@
 
 // NOTE: purposely NOT including oxenc headers
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <climits>
 #include <concepts>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <numeric>
 #include <random>
+#include <type_traits>
 
+#ifdef __linux__
 extern "C" {
 #include <byteswap.h>
 }
+#endif
 
 using namespace std::literals;
 using time_point = std::chrono::steady_clock::time_point;
-
-#define test_bswap_16(x) __builtin_bswap16(x)
-#define test_bswap_32(x) __builtin_bswap32(x)
-#define test_bswap_64(x) __builtin_bswap64(x)
 
 namespace test {
 constexpr bool little_endian = std::endian::native == std::endian::little;
@@ -33,17 +37,23 @@ template <typename T>
 concept endian_swappable_int =
         std::integral<T> && (sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8);
 
-template <std::integral T>
-    requires std::has_unique_object_representations_v<T> && std::is_unsigned_v<T>
-[[nodiscard]] inline constexpr T byteswap_ranges(T val) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+#define OXENC_HARD_INLINE [[gnu::always_inline]]
+#elif defined(_MSC_VER)
+#define OXENC_HARD_INLINE __forceinline
+#else
+#define OXENC_HARD_INLINE
+#endif
+
+template <endian_swappable_int T>
+[[nodiscard]] OXENC_HARD_INLINE inline constexpr T byteswap_ranges(T val) noexcept {
     auto value = std::bit_cast<std::array<std::byte, sizeof(T)>>(val);
     std::ranges::reverse(value);
     return std::bit_cast<T>(value);
 }
 
-template <std::integral T>
-    requires std::has_unique_object_representations_v<T> && std::is_unsigned_v<T>
-[[nodiscard]] inline constexpr T byteswap_fallback(T val) noexcept {
+template <std::unsigned_integral T>
+[[nodiscard]] OXENC_HARD_INLINE inline constexpr T byteswap_fallback1(T val) noexcept {
     size_t diff = CHAR_BIT * (sizeof(T) - 1);
 
     T m1 = UCHAR_MAX;
@@ -60,227 +70,247 @@ template <std::integral T>
 
     return v;
 }
-
-template <endian_swappable_int T>
-constexpr void byteswap_(T& val) {
-    if constexpr (sizeof(T) == 2)
-        val = std::bit_cast<T>(test_bswap_16(std::bit_cast<uint16_t>(val)));
-    else if constexpr (sizeof(T) == 4)
-        val = std::bit_cast<T>(test_bswap_32(std::bit_cast<uint32_t>(val)));
-    else if constexpr (sizeof(T) == 8)
-        val = std::bit_cast<T>(test_bswap_64(std::bit_cast<uint64_t>(val)));
+template <std::signed_integral T>
+[[nodiscard]] OXENC_HARD_INLINE inline constexpr T byteswap_fallback1(T val) noexcept {
+    return std::bit_cast<T>(byteswap_fallback1(std::bit_cast<std::make_unsigned_t<T>>(val)));
 }
 
+template <std::unsigned_integral T>
+[[nodiscard]] OXENC_HARD_INLINE inline constexpr T byteswap_fallback2(T x) noexcept {
+    if constexpr (sizeof(T) == 2)
+        return (x >> 8) | ((x & 0xff) << 8);
+    else if constexpr (sizeof(T) == 4)
+        return ((x & 0xff000000u) >> 24)  // (comments for formatting)
+             | ((x & 0x00ff0000u) >> 8)   //
+             | ((x & 0x0000ff00u) << 8)   //
+             | ((x & 0x000000ffu) << 24);
+    else if constexpr (sizeof(T) == 8)
+        return ((x & 0xff00000000000000ull) >> 56)  // (comments for formatting)
+             | ((x & 0x00ff000000000000ull) >> 40)  //
+             | ((x & 0x0000ff0000000000ull) >> 24)  //
+             | ((x & 0x000000ff00000000ull) >> 8)   //
+             | ((x & 0x00000000ff000000ull) << 8)   //
+             | ((x & 0x0000000000ff0000ull) << 24)  //
+             | ((x & 0x000000000000ff00ull) << 40)  //
+             | ((x & 0x00000000000000ffull) << 56);
+    else
+        static_assert(sizeof(T) == 1);
+}
+
+template <std::signed_integral T>
+[[nodiscard]] OXENC_HARD_INLINE inline constexpr T byteswap_fallback2(T val) noexcept {
+    return std::bit_cast<T>(byteswap_fallback2(std::bit_cast<std::make_unsigned_t<T>>(val)));
+}
+
+enum class Mode { builtin, ranges, fallback1, fallback2, system };
+
+#if defined(__GNUC__) || defined(__clang__)
+#define OXENC_BYTESWAP16 __builtin_bswap16
+#define OXENC_BYTESWAP32 __builtin_bswap32
+#define OXENC_BYTESWAP64 __builtin_bswap64
+#define OXENC_BUILTIN_BYTESWAP_IS_CONSTEXPR
+#elif defined(_MSC_VER)
+#define OXENC_BYTESWAP16 _byteswap_ushort
+#define OXENC_BYTESWAP32 _byteswap_ulong
+#define OXENC_BYTESWAP64 _byteswap_uint64
+#endif
+
+#ifdef OXENC_BYTESWAP64
 template <endian_swappable_int T>
+constexpr T byteswap_builtin(T val) {
+#ifndef OXENC_BUILTIN_BYTESWAP_IS_CONSTEPXR
+    if (std::is_constant_evaluated())
+        return byteswap_fallback2(val);
+#endif
+    if constexpr (sizeof(T) == 2)
+        return std::bit_cast<T>(OXENC_BYTESWAP16(std::bit_cast<uint16_t>(val)));
+    else if constexpr (sizeof(T) == 4)
+        return std::bit_cast<T>(OXENC_BYTESWAP32(std::bit_cast<uint32_t>(val)));
+    else if constexpr (sizeof(T) == 8)
+        return std::bit_cast<T>(OXENC_BYTESWAP64(std::bit_cast<uint64_t>(val)));
+}
+#endif
+
+#ifdef __linux__
+#define OXENC_HAS_BYTESWAP_SYSTEM
+template <endian_swappable_int T>
+constexpr inline T byteswap_system(T val) {
+    if constexpr (sizeof(T) == 2)
+        return std::bit_cast<T>(bswap_16(std::bit_cast<uint16_t>(val)));
+    else if constexpr (sizeof(T) == 4)
+        return std::bit_cast<T>(bswap_32(std::bit_cast<uint32_t>(val)));
+    else if constexpr (sizeof(T) == 8)
+        return std::bit_cast<T>(bswap_64(std::bit_cast<uint64_t>(val)));
+}
+#endif
+
+template <Mode mode, endian_swappable_int T>
+constexpr inline void byteswap_(T& val) {
+    if constexpr (mode == Mode::builtin)
+#ifdef OXENC_BYTESWAP64
+        val = byteswap_builtin(val);
+#else
+        assert(!"builtin not supported on this platform");
+#endif
+    else if constexpr (mode == Mode::ranges)
+        val = byteswap_ranges(val);
+    else if constexpr (mode == Mode::fallback1)
+        val = byteswap_fallback1(val);
+    else if constexpr (mode == Mode::fallback2)
+        val = byteswap_fallback2(val);
+    else {
+        static_assert(mode == Mode::system);
+#ifdef OXENC_HAS_BYTESWAP_SYSTEM
+        val = byteswap_system(val);
+#else
+        assert(!"system not supported on this platform");
+#endif
+    }
+}
+
+template <Mode mode, endian_swappable_int T>
 constexpr void host_to_little_inplace(T& val) {
     if constexpr (!little_endian)
-        byteswap_(val);
+        byteswap_<mode>(val);
 }
 
-template <endian_swappable_int T>
-constexpr void little_to_host_inplace(T& val) {
-    if constexpr (!little_endian)
-        byteswap_(val);
-}
-
-template <endian_swappable_int T>
+template <Mode mode, endian_swappable_int T>
 constexpr void host_to_big_inplace(T& val) {
     if constexpr (!big_endian)
-        byteswap_(val);
+        byteswap_<mode>(val);
 }
 
-template <endian_swappable_int T>
-constexpr void big_to_host_inplace(T& val) {
-    if constexpr (!big_endian)
-        byteswap_(val);
-}
 }  // namespace test
 
-static constexpr std::size_t N{100000};
+constexpr std::size_t N{100'000'000};
+constexpr int ROUNDS =
+#ifdef NDEBUG
+        11;
+#else
+        1;
+#endif
 
-std::array<uint16_t, N> rand_uint16s{};
-std::array<uint32_t, N> rand_uint32s{};
-std::array<uint64_t, N> rand_uint64s{};
+static constexpr auto PRECONTROL = "Pre-Control Warmup"sv;
+static constexpr auto CONTROL = "Control"sv;
+static constexpr auto RANGES = "std::ranges"sv;
+static constexpr auto FALLBACK1 = "Fallback1"sv;
+static constexpr auto FALLBACK2 = "Fallback2"sv;
+static constexpr auto SYSTEMBSWAP = "byteswap.h"sv;
 
-std::array<std::array<time_point, 3>, 4> times{};
+consteval inline uint64_t swapped_builtin(uint64_t x) {
+    test::host_to_big_inplace<test::Mode::builtin>(x);
+    return x;
+}
 
-static constexpr auto CONTROL = "Control Group"sv;
-static constexpr auto RANGES = "std::ranges Group"sv;
-static constexpr auto FALLBACK = "Fallback Group"sv;
-static constexpr auto SYSTEMBSWAP = "byteswap.h Group"sv;
+static constexpr auto x1 = swapped_builtin(123);
+static_assert(x1 == 0x7b00000000000000ul);
 
 int main(int /* argc */, char** /* argv */) {
-    std::random_device rd;
-    std::mt19937 gen{rd()};
+    std::mt19937_64 gen{12345};
 
-    std::uniform_int_distribution<uint16_t> u16generator{};
-    std::uniform_int_distribution<uint32_t> u32generator{};
-    std::uniform_int_distribution<uint64_t> u64generator{};
+    static_assert(N % 4 == 0, "N must be a multiple of 4 for RNG generation");
 
-    auto run_test = [&](std::string_view trial, std::array<time_point, 3>& time_log) {
-        std::cout << "Beginning byteswap test group: " << trial << std::endl;
+    using test::Mode;
 
-        std::cout << "Randomly generating uint{16,32,64} arrays..." << std::endl;
+    std::cout << "Randomly generating uint{16,32,64} arrays..." << std::endl;
 
-        std::generate(
-                rand_uint16s.begin(), rand_uint16s.end(), [&]() { return u16generator(gen); });
-        std::generate(
-                rand_uint32s.begin(), rand_uint32s.end(), [&]() { return u32generator(gen); });
-        std::generate(
-                rand_uint64s.begin(), rand_uint64s.end(), [&]() { return u64generator(gen); });
+    std::vector<uint16_t> rand_uint16s{};
+    std::vector<uint32_t> rand_uint32s{};
+    std::vector<uint64_t> rand_uint64s{};
+
+    std::array<std::array<std::array<time_point, 2>, 3>, 7> times{};
+
+    rand_uint16s.resize(N);
+    rand_uint32s.resize(N);
+    rand_uint64s.resize(N);
+    for (size_t i = 0; i < N / 4; i++) {
+        auto x = gen();
+        rand_uint64s[i] = x;
+        rand_uint32s[i] = x & 0xffffffff;
+        rand_uint16s[i] = x & 0xffff;
+    }
+
+    auto run_test = []<Mode mode, std::integral T>(
+                            std::string_view trial,
+                            std::array<time_point, 2>& time_log,
+                            std::vector<T>& rand_uints) {
+        std::cout << "Starting test group: " << trial << std::endl;
 
         time_log[0] = std::chrono::steady_clock::now();
 
-        for (auto& u16 : rand_uint16s)
-            test::host_to_little_inplace(u16);
+        T tmp{0};
 
-        for (auto& u32 : rand_uint32s)
-            test::host_to_little_inplace(u32);
-
-        for (auto& u64 : rand_uint64s)
-            test::host_to_little_inplace(u64);
-
-        for (auto& u16 : rand_uint16s)
-            test::little_to_host_inplace(u16);
-
-        for (auto& u32 : rand_uint32s)
-            test::little_to_host_inplace(u32);
-
-        for (auto& u64 : rand_uint64s)
-            test::little_to_host_inplace(u64);
+        for (int i = 0; i < ROUNDS; i++) {
+            for (auto& u : rand_uints)
+                test::host_to_big_inplace<mode>(u);
+            // Accumulate one of the values known only at runtime to prevent the compiler from
+            // optimizing away double-swap iterations:
+            tmp += rand_uints[rand_uints[0] % rand_uints.size()];
+        }
 
         time_log[1] = std::chrono::steady_clock::now();
 
-        for (auto& u16 : rand_uint16s)
-            test::host_to_big_inplace(u16);
-
-        for (auto& u32 : rand_uint32s)
-            test::host_to_big_inplace(u32);
-
-        for (auto& u64 : rand_uint64s)
-            test::host_to_big_inplace(u64);
-
-        for (auto& u16 : rand_uint16s)
-            test::big_to_host_inplace(u16);
-
-        for (auto& u32 : rand_uint32s)
-            test::big_to_host_inplace(u32);
-
-        for (auto& u64 : rand_uint64s)
-            test::big_to_host_inplace(u64);
-
-        time_log[2] = std::chrono::steady_clock::now();
-
-        std::cout << "Finished test group: " << trial << "\n" << std::endl;
+        // Actually use tmp so that the compiler can't optimize it away:
+        fmt::print("Finished test group: {}{}\n", trial, tmp == 123 ? "" : ".");
     };
 
-#define test_bswap_16(x) __builtin_bswap16(x)
-#define test_bswap_32(x) __builtin_bswap32(x)
-#define test_bswap_64(x) __builtin_bswap64(x)
+    auto run_tests = [&times, &run_test]<typename T>(std::vector<T>& rand_uints) {
+        size_t time_idx = sizeof(T) == 2 ? 0 : sizeof(T) == 4 ? 1 : 2;
 
-    run_test(CONTROL, times[0]);
+        fmt::print("Running uint{}_t tests ({} iterations)\n", 8 * sizeof(T), ROUNDS * N);
+        std::array<T, 6> tmp;
 
-#undef test_bswap_16
-#undef test_bswap_32
-#undef test_bswap_64
+        tmp[0] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+        fmt::print("pre-test accumulation: {:0{}x}\n", tmp[0], 2 * sizeof(T));
 
-#define test_bswap_16(x) byteswap_ranges<uint16_t>(x)
-#define test_bswap_32(x) byteswap_ranges<uint32_t>(x)
-#define test_bswap_64(x) byteswap_ranges<uint64_t>(x)
+        // Dummy run to warm up the memory locations
+        run_test.template operator()<Mode::builtin>(PRECONTROL, times[0][time_idx], rand_uints);
+        tmp[0] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+        run_test.template operator()<Mode::builtin>(CONTROL, times[1][time_idx], rand_uints);
+        tmp[1] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+        run_test.template operator()<Mode::ranges>(RANGES, times[2][time_idx], rand_uints);
+        tmp[2] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+        run_test.template operator()<Mode::fallback1>(FALLBACK1, times[3][time_idx], rand_uints);
+        tmp[3] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+        run_test.template operator()<Mode::fallback2>(FALLBACK2, times[4][time_idx], rand_uints);
+        tmp[4] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+#ifdef OXENC_HAS_BYTESWAP_SYSTEM
+        run_test.template operator()<Mode::system>(SYSTEMBSWAP, times[5][time_idx], rand_uints);
+        tmp[5] = std::accumulate(rand_uints.begin(), rand_uints.end(), T{0});
+#endif
 
-    run_test(RANGES, times[1]);
+        fmt::print("Done; (accumulated values: {:0{}x})\n", fmt::join(tmp, ","), 2 * sizeof(T));
+    };
 
-#undef test_bswap_16
-#undef test_bswap_32
-#undef test_bswap_64
+    run_tests(rand_uint16s);
+    run_tests(rand_uint32s);
+    run_tests(rand_uint64s);
 
-#define test_bswap_16(x) byteswap_fallback<uint16_t>(x)
-#define test_bswap_32(x) byteswap_fallback<uint32_t>(x)
-#define test_bswap_64(x) byteswap_fallback<uint64_t>(x)
+    auto print_result = [&times](int i, int j, auto& name) {
+        auto& control = times[1][i];
+        auto control_total = control[1] - control[0];
+        auto& t = times[j][i];
+        auto total = t[1].time_since_epoch() - t[0].time_since_epoch();
+        auto diff = total - control_total;
+        auto delta = double(diff.count()) / double(control_total.count()) * 100.0;
+        fmt::print(
+                "{:25s} [uint{}_t]: {:12.9f}s elapsed, {:6.2f}ns/swap, {:10.03f}% vs control\n",
+                name,
+                16 << i,
+                total.count() / 1e9,
+                total.count() / (double)(N * ROUNDS),
+                delta);
+    };
 
-    run_test(FALLBACK, times[2]);
-
-#undef test_bswap_16
-#undef test_bswap_32
-#undef test_bswap_64
-
-#define test_bswap_16(x) bswap_16(x)
-#define test_bswap_32(x) bswap_32(x)
-#define test_bswap_64(x) bswap_64(x)
-
-    run_test(SYSTEMBSWAP, times[3]);
-
-    auto& control_times = times[0];
-
-    std::cout << "TEST GROUP: " << CONTROL << std::endl;
-    std::cout << "\tStart: " << control_times[0].time_since_epoch() << std::endl;
-    std::cout << "\tMidpoint: " << control_times[1].time_since_epoch() << std::endl;
-    std::cout << "\tFinish: " << control_times[2].time_since_epoch() << std::endl;
-    auto control_firsthalf =
-            control_times[1].time_since_epoch() - control_times[0].time_since_epoch();
-    auto control_secondhalf =
-            control_times[2].time_since_epoch() - control_times[1].time_since_epoch();
-    auto control_total = control_firsthalf + control_secondhalf;
-    auto control_avghalf = control_total / 2;
-    std::cout << "\tFirst Half: " << control_firsthalf << ", Second Half: " << control_secondhalf
-              << ", Avg: " << control_avghalf << std::endl;
-    std::cout << "\tTotal: " << control_total << "\n" << std::endl;
-
-    auto& range_times = times[1];
-
-    std::cout << "TEST GROUP: " << RANGES << std::endl;
-    std::cout << "\tStart: " << range_times[0].time_since_epoch() << std::endl;
-    std::cout << "\tMidpoint: " << range_times[1].time_since_epoch() << std::endl;
-    std::cout << "\tFinish: " << range_times[2].time_since_epoch() << std::endl;
-    auto range_firsthalf = range_times[1].time_since_epoch() - range_times[0].time_since_epoch();
-    auto range_secondhalf = range_times[2].time_since_epoch() - range_times[1].time_since_epoch();
-    auto range_total = range_firsthalf + range_secondhalf;
-    auto range_avghalf = range_total / 2;
-    auto range_diff =
-            range_total > control_total ? range_total - control_total : control_total - range_total;
-    auto range_delta = double(range_diff.count()) / double(control_total.count()) * 100.0;
-    std::cout << "\tFirst Half: " << range_firsthalf << ", Second Half: " << range_secondhalf
-              << ", Avg: " << range_avghalf << std::endl;
-    std::cout << "\tTotal: " << range_total << std::endl;
-    std::cout << "\tPercent Diff: " << range_delta << "\%\n" << std::endl;
-
-    auto& fallback_times = times[2];
-
-    std::cout << "TEST GROUP: " << FALLBACK << std::endl;
-    std::cout << "\tStart: " << fallback_times[0].time_since_epoch() << std::endl;
-    std::cout << "\tMidpoint: " << fallback_times[1].time_since_epoch() << std::endl;
-    std::cout << "\tFinish: " << fallback_times[2].time_since_epoch() << std::endl;
-    auto fallback_firsthalf =
-            fallback_times[1].time_since_epoch() - fallback_times[0].time_since_epoch();
-    auto fallback_secondhalf =
-            fallback_times[2].time_since_epoch() - fallback_times[1].time_since_epoch();
-    auto fallback_total = fallback_firsthalf + fallback_secondhalf;
-    auto fallback_avghalf = fallback_total / 2;
-    auto fallback_diff = fallback_total > control_total ? fallback_total - control_total
-                                                        : control_total - fallback_total;
-    auto fallback_delta = double(fallback_diff.count()) / double(control_total.count()) * 100.0;
-    std::cout << "\tFirst Half: " << fallback_firsthalf << ", Second Half: " << fallback_secondhalf
-              << ", Avg: " << fallback_avghalf << std::endl;
-    std::cout << "\tTotal: " << fallback_total << std::endl;
-    std::cout << "\tPercent Diff: " << fallback_delta << "\%\n" << std::endl;
-
-    auto& sys_times = times[3];
-
-    std::cout << "TEST GROUP: " << SYSTEMBSWAP << std::endl;
-    std::cout << "\tStart: " << sys_times[0].time_since_epoch() << std::endl;
-    std::cout << "\tMidpoint: " << sys_times[1].time_since_epoch() << std::endl;
-    std::cout << "\tFinish: " << sys_times[2].time_since_epoch() << std::endl;
-    auto sys_firsthalf = sys_times[1].time_since_epoch() - sys_times[0].time_since_epoch();
-    auto sys_secondhalf = sys_times[2].time_since_epoch() - sys_times[1].time_since_epoch();
-    auto sys_total = sys_firsthalf + sys_secondhalf;
-    auto sys_avghalf = sys_total / 2;
-    auto sys_diff =
-            sys_total > control_total ? sys_total - control_total : control_total - sys_total;
-    auto sys_delta = double(sys_diff.count()) / double(control_total.count()) * 100.0;
-    std::cout << "\tFirst Half: " << sys_firsthalf << ", Second Half: " << sys_secondhalf
-              << ", Avg: " << sys_avghalf << std::endl;
-    std::cout << "\tTotal: " << sys_total << std::endl;
-    std::cout << "\tPercent Diff: " << sys_delta << "\%\n" << std::endl;
-
-    return 0;
+    for (int i : {0, 1, 2}) {
+        std::cout << "\n";
+        print_result(i, 0, PRECONTROL);
+        print_result(i, 1, CONTROL);
+        print_result(i, 2, RANGES);
+        print_result(i, 3, FALLBACK1);
+        print_result(i, 4, FALLBACK2);
+#ifdef __linux__
+        print_result(i, 5, SYSTEMBSWAP);
+#endif
+    }
 }

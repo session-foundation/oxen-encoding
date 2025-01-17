@@ -52,11 +52,11 @@ struct bt_value : bt_variant {
     using bt_variant::operator=;
 
     template <typename T>
-    requires std::unsigned_integral<std::remove_cvref_t<T>>
+        requires std::unsigned_integral<std::remove_cvref_t<T>>
     bt_value(T&& u_val) : bt_variant{static_cast<uint64_t>(u_val)} {}
 
     template <typename T>
-    requires std::signed_integral<std::remove_cvref_t<T>>
+        requires std::signed_integral<std::remove_cvref_t<T>>
     bt_value(T&& s_val) : bt_variant{static_cast<int64_t>(s_val)} {}
 
     template <typename... T>
@@ -68,7 +68,8 @@ struct bt_value : bt_variant {
             bt_variant{detail::tuple_to_list(pair, std::index_sequence_for<S, T>{})} {}
 
     template <typename T>
-    requires(!std::integral<std::remove_cvref_t<T>> && !detail::is_tuple<std::remove_cvref_t<T>>)
+        requires(
+                !std::integral<std::remove_cvref_t<T>> && !detail::is_tuple<std::remove_cvref_t<T>>)
     bt_value(T&& v) : bt_variant{std::forward<T>(v)} {}
 
     template <const_span_type T>

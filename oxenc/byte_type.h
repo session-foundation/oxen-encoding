@@ -25,9 +25,9 @@ struct byte_type<OutputIt> {
 
 // iterator, raw pointers:
 template <typename OutputIt>
-requires(
-        !iterator_with_container<OutputIt> &&
-        std::is_reference_v<typename std::iterator_traits<OutputIt>::reference>)
+    requires(
+            !iterator_with_container<OutputIt> &&
+            std::is_reference_v<typename std::iterator_traits<OutputIt>::reference>)
 struct byte_type<OutputIt> {
     using type = std::remove_reference_t<typename std::iterator_traits<OutputIt>::reference>;
 };

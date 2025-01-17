@@ -8,15 +8,24 @@
 #include <memory>
 #include <utility>
 
-#if !(defined(__clang__) || defined(__GNUC__))
+#if defined(__GNUC__) || defined(__clang__)
+#define OXENC_BYTESWAP16 __builtin_bswap16
+#define OXENC_BYTESWAP32 __builtin_bswap32
+#define OXENC_BYTESWAP64 __builtin_bswap64
+#define OXENC_BUILTIN_BYTESWAP_IS_CONSTEXPR
 
-#if defined(_MSC_VER)
+#elif defined(__linux__)
+extern "C" {
+#include <byteswap.h>
+}
+#define OXENC_BYTESWAP16 bswap_16
+#define OXENC_BYTESWAP32 bswap_32
+#define OXENC_BYTESWAP64 bswap_64
+#elif defined(_MSC_VER)
 #include <cstdlib>
-
-#else
-#include <algorithm>
-
-#endif
+#define OXENC_BYTESWAP16 _byteswap_ushort
+#define OXENC_BYTESWAP32 _byteswap_ulong
+#define OXENC_BYTESWAP64 _byteswap_uint64
 #endif
 
 namespace oxenc {
@@ -35,44 +44,31 @@ template <class To, class From>
 }
 #endif
 
-#if defined(__clang__) || defined(__GNUC__)
-#define bswap_16(x) __builtin_bswap16(x)
-#define bswap_32(x) __builtin_bswap32(x)
-#define bswap_64(x) __builtin_bswap64(x)
-
-#else  //  MSVC and other weird compiler choices
-template <std::integral T>
-    requires std::has_unique_object_representations_v<T> && std::is_unsigned_v<T>
-[[nodiscard]] inline constexpr T byteswap(T val) noexcept {
-    if (std::is_constant_evaluated()) {
-        auto value = bit_cast<std::array<std::byte, sizeof(T)>>(val);
-        std::ranges::reverse(value);
-        return bit_cast<T>(value);
+namespace detail {
+    template <std::unsigned_integral T>
+    [[nodiscard]] inline constexpr T byteswap_fallback(T x) noexcept {
+        if constexpr (sizeof(T) == 2)
+            return (x >> 8) | ((x & 0xff) << 8);
+        else if constexpr (sizeof(T) == 4)
+            return ((x & 0xff000000u) >> 24)  // (comments for formatting)
+                 | ((x & 0x00ff0000u) >> 8)   //
+                 | ((x & 0x0000ff00u) << 8)   //
+                 | ((x & 0x000000ffu) << 24);
+        else if constexpr (sizeof(T) == 8)
+            return ((x & 0xff00000000000000ull) >> 56)  // (comments for formatting)
+                 | ((x & 0x00ff000000000000ull) >> 40)  //
+                 | ((x & 0x0000ff0000000000ull) >> 24)  //
+                 | ((x & 0x000000ff00000000ull) >> 8)   //
+                 | ((x & 0x00000000ff000000ull) << 8)   //
+                 | ((x & 0x0000000000ff0000ull) << 24)  //
+                 | ((x & 0x000000000000ff00ull) << 40)  //
+                 | ((x & 0x00000000000000ffull) << 56);
+        else {
+            static_assert(sizeof(T) == 1);
+            return x;
+        }
     }
-
-    // fallback implementation
-    size_t diff = CHAR_BIT * (sizeof(T) - 1);
-
-    T m1 = UCHAR_MAX;
-    T m2 = (T)(m1 << diff);
-    T v = val;
-
-    for (size_t i = 0; i < sizeof(T) / 2; ++i) {
-        T b1 = v & m1, b2 = v & m2;
-        v = (T)(v ^ b1 ^ b2 ^ (b1 << diff) ^ (b2 >> diff));
-        m1 <<= CHAR_BIT;
-        m2 >>= CHAR_BIT;
-        diff -= 2 * CHAR_BIT;
-    }
-
-    return v;
-}
-
-#define bswap_16(x) byteswap<uint16_t>(x)
-#define bswap_32(x) byteswap<uint32_t>(x)
-#define bswap_64(x) byteswap<uint64_t>(x)
-
-#endif
+}  // namespace detail
 
 /// True if this is a little-endian platform
 inline constexpr bool little_endian = std::endian::native == std::endian::little;
@@ -90,12 +86,20 @@ concept endian_swappable_integer =
 /// endian-aware functions rather than this.
 template <endian_swappable_integer T>
 constexpr void byteswap_inplace(T& val) {
+#ifndef OXENC_BYTESWAP64
+    val = bit_cast<T>(detail::byteswap_fallback(bit_cast<std::make_unsigned_t<T>>(val)));
+#else
+#ifndef OXENC_BUILTIN_BYTESWAP_IS_CONSTEXPR
+    if (std::is_constant_evaluated())
+        val = bit_cast<T>(detail::byteswap_fallback(bit_cast<std::make_unsigned_t<T>>(val)));
+#endif
     if constexpr (sizeof(T) == 2)
-        val = bit_cast<T>(bswap_16(bit_cast<uint16_t>(val)));
+        val = bit_cast<T>(OXENC_BYTESWAP16(bit_cast<uint16_t>(val)));
     else if constexpr (sizeof(T) == 4)
-        val = bit_cast<T>(bswap_32(bit_cast<uint32_t>(val)));
+        val = bit_cast<T>(OXENC_BYTESWAP32(bit_cast<uint32_t>(val)));
     else if constexpr (sizeof(T) == 8)
-        val = bit_cast<T>(bswap_64(bit_cast<uint64_t>(val)));
+        val = bit_cast<T>(OXENC_BYTESWAP64(bit_cast<uint64_t>(val)));
+#endif
 }
 
 /// Converts a host-order integer value into a little-endian value, mutating it.  Does nothing

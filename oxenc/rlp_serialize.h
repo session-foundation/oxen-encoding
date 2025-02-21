@@ -28,11 +28,11 @@ struct rlp_value : rlp_variant {
     using rlp_variant::operator=;
 
     template <typename T>
-    requires std::unsigned_integral<std::remove_cvref_t<T>>
+        requires std::unsigned_integral<std::remove_cvref_t<T>>
     rlp_value(T&& val) : rlp_variant{static_cast<uint64_t>(val)} {}
 
     template <typename T>
-    requires(!std::integral<std::remove_cvref_t<T>>)
+        requires(!std::integral<std::remove_cvref_t<T>>)
     rlp_value(T&& v) : rlp_variant{std::forward<T>(v)} {}
 
     rlp_value(const char* s) : rlp_value{std::string_view{s}} {}
@@ -43,7 +43,7 @@ namespace detail {
     constexpr bool is_rlp_serializable = false;
 
     template <typename T>
-    requires std::unsigned_integral<std::remove_cvref_t<T>>
+        requires std::unsigned_integral<std::remove_cvref_t<T>>
     constexpr bool is_rlp_serializable<T> = true;
 
     template <typename T>
@@ -64,7 +64,7 @@ namespace detail {
     constexpr bool is_list<std::list<T>> = true;
 
     template <typename T>
-    requires span_convertible<T>
+        requires span_convertible<T>
     constexpr bool is_rlp_serializable<T> =
             is_rlp_serializable<std::span<const typename T::value_type>>;
 
@@ -159,7 +159,7 @@ std::span<const Char> rlp_big_integer(std::span<const Char> s) {
 }
 
 template <detail::span_convertible Container>
-requires basic_char<std::remove_cvref_t<typename Container::value_type>>
+    requires basic_char<std::remove_cvref_t<typename Container::value_type>>
 auto rlp_big_integer(const Container& c) {
     return rlp_big_integer(std::span<const typename Container::value_type>{c});
 }

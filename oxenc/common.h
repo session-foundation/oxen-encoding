@@ -80,7 +80,7 @@ using namespace std::literals;
 using std::lexicographical_compare_three_way;
 #else
 template <class InputIterator1, class InputIterator2, class Cmp>
-constexpr auto lexicographical_compare_three_way(
+inline constexpr auto lexicographical_compare_three_way(
         InputIterator1 first1,
         InputIterator1 last1,
         InputIterator2 first2,

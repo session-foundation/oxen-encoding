@@ -76,7 +76,7 @@ concept const_contiguous_range_t =
 
 using namespace std::literals;
 
-#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION >= 170000
+#if !defined(ANDROID) && (!defined(_LIBCPP_VERSION) || _LIBCPP_VERSION >= 170000)
 using std::lexicographical_compare_three_way;
 #else
 template <class InputIterator1, class InputIterator2, class Cmp>

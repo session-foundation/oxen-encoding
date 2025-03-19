@@ -3,11 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include "byte_type.h"
-#include "span.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -59,14 +60,14 @@ namespace detail {
 
 /// Returns the number of characters required to encode a base64 string from the given number of
 /// bytes.
-inline constexpr size_t to_base64_size(size_t byte_size, bool padded = true) {
+constexpr size_t to_base64_size(size_t byte_size, bool padded = true) {
     return padded ? (byte_size + 2) / 3 * 4   // bytes*4/3, rounded up to the next multiple of 4
                   : (byte_size * 4 + 2) / 3;  // ⌈bytes*4/3⌉
 }
 /// Returns the (maximum) number of bytes required to decode a base64 string of the given size.
 /// Note that this may overallocate by 1-2 bytes if the size includes 1-2 padding chars.  Returns 0
 /// if the given size is not a valid base64 padded or unpadded size.
-inline constexpr size_t from_base64_size(size_t b64_size) {
+constexpr size_t from_base64_size(size_t b64_size) {
     size_t s = b64_size * 3;
     return s % 4 < 3 ? s / 4 : 0;
     // unpadded base64 use 4n+{0,2,3} characters
@@ -157,7 +158,7 @@ struct base64_encoder final {
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base64
 /// character).
 template <typename InputIt, typename OutputIt>
-OutputIt to_base64(InputIt begin, InputIt end, OutputIt out, bool padded = true) {
+constexpr OutputIt to_base64(InputIt begin, InputIt end, OutputIt out, bool padded = true) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base64 requires chars/bytes");
     auto it = base64_encoder{begin, end, padded};
     return std::copy(it, it.end(), out);
@@ -195,33 +196,26 @@ std::string to_base64_unpadded(It begin, It end) {
 
 /// Creates a base64 string from an iterable, std::string-like object.  The string will have '='
 /// padding, if appropriate.
-template <basic_char CharT>
-std::string to_base64(std::basic_string_view<CharT> s) {
-    return to_base64(s.begin(), s.end());
-}
-
 inline std::string to_base64(std::string_view s) {
-    return to_base64<>(s);
-}
-
-template <basic_char CharT>
-std::string to_base64(const std::basic_string<CharT>& s) {
     return to_base64(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string to_base64(std::span<CharT> s) {
+inline std::string to_base64(std::span<const unsigned char> s) {
+    return to_base64(s.begin(), s.end());
+}
+inline std::string to_base64(std::span<const std::byte> s) {
     return to_base64(s.begin(), s.end());
 }
 
 /// Creates a base64 string from an iterable, std::string-like object.  The string will not be
 /// padded.
-template <typename CharT>
-std::string to_base64_unpadded(std::basic_string_view<CharT> s) {
+inline std::string to_base64_unpadded(std::string_view s) {
     return to_base64_unpadded(s.begin(), s.end());
 }
-inline std::string to_base64_unpadded(std::string_view s) {
-    return to_base64_unpadded<>(s);
+inline std::string to_base64_unpadded(std::span<const unsigned char> s) {
+    return to_base64_unpadded(s.begin(), s.end());
+}
+inline std::string to_base64_unpadded(std::span<const std::byte> s) {
+    return to_base64_unpadded(s.begin(), s.end());
 }
 
 /// Returns true if the range is a base64 encoded value; we allow (but do not require) '=' padding,
@@ -268,24 +262,16 @@ constexpr bool is_base64(It begin, It end) {
 }
 
 /// Returns true if the string-like value is a base64 encoded value
-template <basic_char CharT>
-constexpr bool is_base64(std::basic_string_view<CharT> s) {
-    return is_base64(s.begin(), s.end());
-}
-
 constexpr bool is_base64(std::string_view s) {
     return is_base64(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-constexpr bool is_base64(const std::basic_string<CharT>& s) {
+constexpr bool is_base64(std::span<const unsigned char> s) {
+    return is_base64(s.begin(), s.end());
+}
+constexpr bool is_base64(std::span<const std::byte> s) {
     return is_base64(s.begin(), s.end());
 }
 
-template <basic_char CharT>
-constexpr bool is_base64(std::span<CharT> s) {
-    return is_base64(s.begin(), s.end());
-}
 /// Iterable object for on-the-fly base64 decoding.  Used internally, but also particularly useful
 /// when converting from one encoding to another.  The input range must be a valid base64 encoded
 /// string (with or without padding).
@@ -393,9 +379,7 @@ constexpr OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_base64(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<
-                          std::random_access_iterator_tag,
-                          typename std::iterator_traits<It>::iterator_category>) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         bytes.reserve(from_base64_size(static_cast<size_t>(distance(begin, end))));
     }
@@ -405,22 +389,13 @@ std::string from_base64(It begin, It end) {
 
 /// Converts base64 digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid base64 characters.
-template <basic_char CharT>
-std::string from_base64(std::basic_string_view<CharT> s) {
-    return from_base64(s.begin(), s.end());
-}
-
 inline std::string from_base64(std::string_view s) {
-    return from_base64<>(s);
-}
-
-template <basic_char CharT>
-std::string from_base64(const std::basic_string<CharT>& s) {
     return from_base64(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string from_base64(std::span<CharT> s) {
+inline std::string from_base64(std::span<const unsigned char> s) {
+    return from_base64(s.begin(), s.end());
+}
+inline std::string from_base64(std::span<const std::byte> s) {
     return from_base64(s.begin(), s.end());
 }
 
@@ -439,8 +414,6 @@ namespace detail {
         Char decoded[size];
 
         uint8_t valid;  // 0 == invalid, otherwise the number of trailing null bytes (1-3)
-
-        constexpr const_span<const Char> span() const { return {decoded, size - valid}; }
     };
     template <size_t N>
     struct c_b64_literal : b64_literal<char, N> {
@@ -458,21 +431,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b64_literal Base64>
-    constexpr auto operator""_b64() {
+    constexpr std::string_view operator""_b64() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.span();
+        return {Base64.decoded, Base64.size - Base64.valid};
     }
 
     template <detail::b_b64_literal Base64>
-    constexpr auto operator""_b64_b() {
+    constexpr std::span<const std::byte> operator""_b64_b() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.span();
+        return {Base64.decoded, Base64.size - Base64.valid};
     }
 
     template <detail::u_b64_literal Base64>
-    constexpr auto operator""_b64_u() {
+    constexpr std::span<const unsigned char> operator""_b64_u() {
         static_assert(Base64.valid, "Invalid base64 literal");
-        return Base64.span();
+        return {Base64.decoded, Base64.size - Base64.valid};
     }
 }  // namespace literals
 

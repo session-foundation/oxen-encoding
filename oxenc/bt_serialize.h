@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <cstring>
@@ -17,10 +18,8 @@
 #include <utility>
 #include <vector>
 
-#include "bt_common.h"
 #include "bt_value.h"
-#include "span.h"
-#include "variant.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -60,9 +59,6 @@ class bt_deserialize_invalid_type : public bt_deserialize_invalid {
 };
 
 namespace detail {
-    template <typename T>
-    concept consumer_input = const_span_type<T> || char_view_type<T>;
-
     /// Reads digits into an unsigned 64-bit int.
     uint64_t extract_unsigned(std::string_view& s);
     // (Provide non-constant lvalue and rvalue ref functions so that we only accept explicit
@@ -70,6 +66,15 @@ namespace detail {
     inline uint64_t extract_unsigned(std::string_view&& s) {
         return extract_unsigned(s);
     }
+
+    template <typename Func, typename... Args>
+    concept void_invocable =
+            std::invocable<Func, Args...> && std::is_void_v<std::invoke_result_t<Func, Args...>>;
+    template <typename Func>
+    concept verify_func =
+            void_invocable<Func, std::string_view, std::string_view> ||
+            void_invocable<Func, std::span<const unsigned char>, std::span<const unsigned char>> ||
+            void_invocable<Func, std::span<const std::byte>, std::span<const std::byte>>;
 
     // Fallback base case; we only get here if none of the partial specializations below work
     template <typename T>
@@ -119,8 +124,7 @@ namespace detail {
         }
     };
 
-    template <typename T>
-        requires std::integral<T>
+    template <std::integral T>
     struct bt_deserialize<T> {
         void operator()(std::string_view& s, T& val) {
             constexpr uint64_t umax = static_cast<uint64_t>(std::numeric_limits<T>::max());
@@ -189,13 +193,13 @@ namespace detail {
         }
     };
 
-    /// const_span specialization
-    template <oxenc::const_span_type T>
-    struct bt_deserialize<T> {
-        void operator()(std::string_view& s, T& val) {
+    /// const span specialization
+    template <basic_char Char>
+    struct bt_deserialize<std::span<const Char>> {
+        void operator()(std::string_view& s, std::span<const Char>& val) {
             std::string_view view;
             bt_deserialize<std::string_view>{}(s, view);
-            val = {reinterpret_cast<const typename T::value_type*>(view.data()), view.size()};
+            val = {reinterpret_cast<const Char*>(view.data()), view.size()};
         }
     };
 
@@ -436,7 +440,7 @@ namespace detail {
                 "all variant types must be bt-serializable");
 
         void operator()(std::ostream& os, const std::variant<Ts...>& val) {
-            var::visit(
+            std::visit(
                     [&os](const auto& val) {
                         using T = std::remove_cvref_t<decltype(val)>;
                         bt_serialize<T>{}(os, val);
@@ -551,11 +555,14 @@ T bt_deserialize(std::string_view s) {
     return val;
 }
 
-template <typename ReturnT, const_span_type SpanT>
-ReturnT bt_deserialize(SpanT sp) {
-    ReturnT val;
-    bt_deserialize(detail::span_to_sv(sp), val);
-    return val;
+template <typename T>
+T bt_deserialize(std::span<const std::byte> sp) {
+    return bt_deserialize<T>(std::string_view{reinterpret_cast<const char*>(sp.data()), sp.size()});
+}
+
+template <typename T>
+T bt_deserialize(std::span<const unsigned char> sp) {
+    return bt_deserialize<T>(std::string_view{reinterpret_cast<const char*>(sp.data()), sp.size()});
 }
 
 /// Deserializes the given value into a generic `bt_value` type (wrapped std::variant) which is
@@ -592,7 +599,7 @@ IntType get_int(const bt_value& v) {
         return static_cast<IntType>(*value);
     }
 
-    int64_t value = var::get<int64_t>(v);  // throws if no int contained
+    int64_t value = std::get<int64_t>(v);  // throws if no int contained
     if constexpr (!std::same_as<IntType, int64_t>)
         if (value > static_cast<int64_t>(std::numeric_limits<IntType>::max()) ||
             value < static_cast<int64_t>(std::numeric_limits<IntType>::min()))
@@ -619,7 +626,7 @@ Tuple get_tuple(const bt_list& x) {
 }
 template <tuple_like Tuple>
 Tuple get_tuple(const bt_value& x) {
-    return get_tuple<Tuple>(var::get<bt_list>(static_cast<const bt_variant&>(x)));
+    return get_tuple<Tuple>(std::get<bt_list>(static_cast<const bt_variant&>(x)));
 }
 
 class bt_dict_consumer;
@@ -635,16 +642,16 @@ namespace detail {
             if (std::holds_alternative<bt_list>(v))
                 throw std::invalid_argument{
                         "Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
-            t = get_tuple<T>(var::get<bt_list>(v));
+            t = get_tuple<T>(std::get<bt_list>(v));
         } else if constexpr (std::same_as<std::string, T> || std::same_as<std::string_view, T>) {
             // If we request a string/string_view, we might have the other one and need to copy/view
             // it.
             if (std::holds_alternative<std::string_view>(v))
-                t = var::get<std::string_view>(v);
+                t = std::get<std::string_view>(v);
             else
-                t = var::get<std::string>(v);
+                t = std::get<std::string>(v);
         } else {
-            t = var::get<T>(v);
+            t = std::get<T>(v);
         }
     }
     template <tuple_like Tuple, size_t... Is>
@@ -659,9 +666,11 @@ namespace detail {
     T consume_impl(Consumer& c) {
         if constexpr (std::integral<T>)
             return c.template consume_integer<T>();
-        else if constexpr (string_like<T>)
-            return T{c.template consume_string_view<typename T::value_type>()};
-        else if constexpr (const_span_type<T>)
+        else if constexpr (std::same_as<T, std::string> || std::same_as<T, std::string_view>)
+            return T{c.consume_string_view()};
+        else if constexpr (
+                std::same_as<T, std::span<const std::byte>> ||
+                std::same_as<T, std::span<const unsigned char>>)
             return T{c.template consume_span<typename T::value_type>()};
         else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
             return c.template consume_list<T>();
@@ -692,7 +701,7 @@ class bt_list_consumer {
     bt_list_consumer(const char* input, size_t size, load_tag) : data{input, size} {}
 
   public:
-    bt_list_consumer(std::string_view data_) :
+    explicit bt_list_consumer(std::string_view data_) :
             bt_list_consumer{data_.data(), data_.size(), load_tag{}} {
         if (data.empty())
             throw std::runtime_error{"Cannot create a bt_list_consumer with no data"};
@@ -701,8 +710,10 @@ class bt_list_consumer {
         data.remove_prefix(1);
     }
 
-    template <detail::consumer_input T>
-    bt_list_consumer(T input) :
+    explicit bt_list_consumer(std::span<const unsigned char> input) :
+            bt_list_consumer{
+                    std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
+    explicit bt_list_consumer(std::span<const std::byte> input) :
             bt_list_consumer{
                     std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
 
@@ -738,12 +749,8 @@ class bt_list_consumer {
 
     /// Attempt to parse the next value as a string (and advance just past it).  Throws if the next
     /// value is not a string.
-    template <basic_char Char = char>
-    std::basic_string<Char> consume_string() {
-        return std::basic_string<Char>{consume_string_view<Char>()};
-    }
-    template <basic_char Char = char>
-    std::basic_string_view<Char> consume_string_view() {
+    std::string consume_string() { return std::string{consume_string_view()}; }
+    std::string_view consume_string_view() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
         else if (!is_string())
@@ -751,18 +758,18 @@ class bt_list_consumer {
         std::string_view next{data}, result;
         detail::bt_deserialize<std::string_view>{}(next, result);
         data = next;
-        return {reinterpret_cast<const Char*>(result.data()), result.size()};
+        return result;
     }
 
-    template <basic_char Char = char>
-    const_span<Char> consume_span() {
+    template <basic_char Char>
+    std::span<const Char> consume_span() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
         else if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
         std::string_view next{data};
-        const_span<Char> result;
-        detail::bt_deserialize<const_span<Char>>{}(next, result);
+        std::span<const Char> result;
+        detail::bt_deserialize<std::span<const Char>>{}(next, result);
         data = next;
         return result;
     }
@@ -825,9 +832,8 @@ class bt_list_consumer {
     /// entire thing.  This is recursive into both lists and dicts and likely to be quite
     /// inefficient for large, nested structures (unless the values only need to be skipped but
     /// aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <basic_char Char = char>
-    std::basic_string_view<Char> consume_list_data() {
-        std::basic_string_view<Char> orig{reinterpret_cast<const Char*>(data.data()), data.size()};
+    std::string_view consume_list_data() {
+        auto orig = data;
         if (data.size() < 2 || !is_list())
             throw bt_deserialize_invalid_type{"next bt value is not a list"};
         data.remove_prefix(1);  // Descend into the sublist, consume the "l"
@@ -847,9 +853,8 @@ class bt_list_consumer {
     /// entire thing.  This is recursive into both lists and dicts and likely to be quite
     /// inefficient for large, nested structures (unless the values only need to be skipped but
     /// aren't separately needed).  This, however, does not require dynamic memory allocation.
-    template <basic_char Char = char>
-    std::basic_string_view<Char> consume_dict_data() {
-        std::basic_string_view<Char> orig{reinterpret_cast<const Char*>(data.data()), data.size()};
+    std::string_view consume_dict_data() {
+        auto orig = data;
         if (data.size() < 2 || !is_dict())
             throw bt_deserialize_invalid_type{"next bt value is not a dict"};
         data.remove_prefix(1);  // Descent into the dict, consumer the "d"
@@ -868,16 +873,16 @@ class bt_list_consumer {
     }
 
     /// Shortcut for wrapping `consume_list_data()` in a new list consumer
-    bt_list_consumer consume_list_consumer() { return consume_list_data(); }
+    bt_list_consumer consume_list_consumer() { return bt_list_consumer{consume_list_data()}; }
     /// Shortcut for wrapping `consume_dict_data()` in a new dict consumer
     inline bt_dict_consumer consume_dict_consumer();
 
     /// Consumes a string as a signature value, as added via bt_list_producer::append_signature.
     /// The expected signed message (i.e. the data parsed up to the current point) and the signature
     /// itself (the next element string value) are passed to the given VerifyFunc.  The VerifyFunc
-    /// must take two std::string_views or two std::basic_string_view<C> for C of either `unsigned
-    /// char` (aka `uint8_t`) or `std::byte`.  The first argument is the allegedly signed message
-    /// (i.e. already-consumed list data), and the second argument is the signature.
+    /// must be invocable with two std::string_views, two span<const unsigned char>, or two
+    /// span<const std::byte> values.  The first argument is the allegedly signed message (i.e.
+    /// already-consumed list data), and the second argument is the signature.
     ///
     /// The VerifyFunc must not return a value (to prevent against accidentally passing a
     /// bool-returning verification function); it should (typically) be a function that throws on
@@ -885,19 +890,26 @@ class bt_list_consumer {
     /// caught here (and so propagates back to the consume_signature() caller).
     ///
     /// Does not return a value (if the signature is needed then the callback can copy/store it).
-    template <detail::void_return_func VerifyFunc>
+    template <detail::void_invocable<std::string_view, std::string_view> VerifyFunc>
     void consume_signature(VerifyFunc verify) {
-        using traits = detail::function_traits<VerifyFunc>;
-        using InputT = typename traits::template argument_type<0>;
-        using CharT = typename InputT::value_type;
-
-        auto msg = InputT{
-                reinterpret_cast<const CharT*>(start), static_cast<size_t>(data.data() - start)};
-
-        if constexpr (std::same_as<std::string_view, InputT>)
-            return verify(std::move(msg), consume_string_view<char>());
-        else
-            return verify(std::move(msg), consume_span<CharT>());
+        std::string_view msg{start, static_cast<size_t>(data.data() - start)};
+        return verify(msg, consume_string_view());
+    }
+    template <detail::void_invocable<std::span<const unsigned char>, std::span<const unsigned char>>
+                      VerifyFunc>
+    void consume_signature(VerifyFunc verify) {
+        std::span msg{
+                reinterpret_cast<const unsigned char*>(start),
+                static_cast<size_t>(data.data() - start)};
+        return verify(msg, consume_span<unsigned char>());
+    }
+    template <detail::void_invocable<std::span<const std::byte>, std::span<const std::byte>>
+                      VerifyFunc>
+    void consume_signature(VerifyFunc verify) {
+        std::span msg{
+                reinterpret_cast<const std::byte*>(start),
+                static_cast<size_t>(data.data() - start)};
+        return verify(msg, consume_span<std::byte>());
     }
 
     /// Consumes a value without returning it.
@@ -930,7 +942,7 @@ class bt_list_consumer {
         if (data.size() != 1)
             throw bt_deserialize_invalid{"Dict finished without consuming the entire buffer"};
     }
-};
+};  // namespace oxenc
 
 /// Class that allows you to walk through key-value pairs of a bt-encoded dict in memory without
 /// copying or allocating memory.  It accesses existing memory directly and so the caller must
@@ -964,7 +976,7 @@ class bt_dict_consumer : private bt_list_consumer {
     }
 
   public:
-    bt_dict_consumer(std::string_view data_) :
+    explicit bt_dict_consumer(std::string_view data_) :
             bt_list_consumer{data_.data(), data_.size(), load_tag{}} {
         if (data.empty())
             throw std::runtime_error{"Cannot create a bt_dict_consumer with an empty string_view "};
@@ -973,8 +985,10 @@ class bt_dict_consumer : private bt_list_consumer {
         data.remove_prefix(1);
     }
 
-    template <detail::consumer_input T>
-    bt_dict_consumer(T input) :
+    explicit bt_dict_consumer(std::span<const unsigned char> input) :
+            bt_dict_consumer{
+                    std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
+    explicit bt_dict_consumer(std::span<const std::byte> input) :
             bt_dict_consumer{
                     std::string_view{reinterpret_cast<const char*>(input.data()), input.size()}} {}
 
@@ -1011,32 +1025,24 @@ class bt_dict_consumer : private bt_list_consumer {
         return key_;
     }
 
-    template <basic_char T>
-    const_span<T> key_span() {
-        if (!consume_key())
-            throw bt_deserialize_invalid{"Cannot access next key: at the end of the dict"};
-        return const_span<T>{reinterpret_cast<const T*>(key_.data()), key_.size()};
-    }
-
     /// Attempt to parse the next value as a string->string pair (and advance just past it).
     /// Throws if the next value is not a string.
-    template <basic_char Char = char>
-    std::pair<std::string_view, std::basic_string_view<Char>> next_string() {
+    std::pair<std::string_view, std::string_view> next_string() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-        std::pair<std::string_view, std::basic_string_view<Char>> ret;
-        ret.second = bt_list_consumer::consume_string_view<Char>();
+        std::pair<std::string_view, std::string_view> ret;
+        ret.second = bt_list_consumer::consume_string_view();
         ret.first = flush_key();
         return ret;
     }
 
     /// Attempt to parse the next value as a string->span pair (and advance just past it).
-    /// Throws if the next value is not a const_span
-    template <typename Char = char>
-    std::pair<std::string_view, const_span<Char>> next_span() {
+    /// Throws if the next value is not a string.
+    template <typename Char>
+    std::pair<std::string_view, std::span<const Char>> next_span() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-        std::pair<std::string_view, const_span<Char>> ret;
+        std::pair<std::string_view, std::span<const Char>> ret;
         ret.second = bt_list_consumer::consume_span<Char>();
         ret.first = flush_key();
         return ret;
@@ -1099,49 +1105,47 @@ class bt_dict_consumer : private bt_list_consumer {
     /// quite inefficient for large, nested structures (unless the values only need to be
     /// skipped but aren't separately needed).  This, however, does not require dynamic memory
     /// allocation.
-    template <basic_char Char = char>
-    std::pair<std::string_view, std::basic_string_view<Char>> next_list_data() {
+    std::pair<std::string_view, std::string_view> next_list_data() {
         if (data.size() < 2 || !is_list())
             throw bt_deserialize_invalid_type{"next bt dict value is not a list"};
-        return {flush_key(), bt_list_consumer::consume_list_data<Char>()};
+        return {flush_key(), bt_list_consumer::consume_list_data()};
     }
 
     /// Same as next_list_data(), but wraps the value in a bt_list_consumer for convenience
-    std::pair<std::string_view, bt_list_consumer> next_list_consumer() { return next_list_data(); }
+    std::pair<std::string_view, bt_list_consumer> next_list_consumer() {
+        auto next = next_list_data();
+        return {next.first, bt_list_consumer{next.second}};
+    }
 
     /// Attempts to parse the next value as a string->dict pair and returns the string_view that
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
     /// quite inefficient for large, nested structures (unless the values only need to be
     /// skipped but aren't separately needed).  This, however, does not require dynamic memory
     /// allocation.
-    template <basic_char Char = char>
-    std::pair<std::string_view, std::basic_string_view<Char>> next_dict_data() {
+    std::pair<std::string_view, std::string_view> next_dict_data() {
         if (data.size() < 2 || !is_dict())
             throw bt_deserialize_invalid_type{"next bt dict value is not a dict"};
-        return {flush_key(), bt_list_consumer::consume_dict_data<Char>()};
+        return {flush_key(), bt_list_consumer::consume_dict_data()};
     }
 
     /// Same as next_dict_data(), but wraps the value in a bt_dict_consumer for convenience
-    std::pair<std::string_view, bt_dict_consumer> next_dict_consumer() { return next_dict_data(); }
+    std::pair<std::string_view, bt_dict_consumer> next_dict_consumer() {
+        auto next = next_dict_data();
+        return {next.first, bt_dict_consumer{next.second}};
+    }
 
     /// Parses the next value as a string->string pair that has been constructed to contain a
-    /// signature produced via bt_dict_producer::append_signature.  Returns a tuple of three
-    /// values:
+    /// signature produced via bt_dict_producer::append_signature.  Returns an array of three
+    /// std::string_views:
     ///
-    /// - the key (std::string_view)
+    /// - the key
     /// - the message that is allegedly signed, consisting of all (so-far) consumed data from
     /// the dict
     /// - the signature value
     ///
     /// Verification of the signature is up to the caller.  See also consume_signature().
-    ///
-    /// The latter two are std::string_views by default, but a `Char` template type can be
-    /// provided to return them as some other basic_string_view<Char>.
-    template <basic_char Char = char>
-    std::tuple<std::string_view, std::basic_string_view<Char>, std::basic_string_view<Char>>
-    next_signature_view() {
-        std::tuple<std::string_view, std::basic_string_view<Char>, std::basic_string_view<Char>>
-                ret;
+    std::array<std::string_view, 3> next_signature_view() {
+        std::array<std::string_view, 3> ret;
         auto& [k, msg, sig] = ret;
         // Figuring out `msg` gets a little complicated.
         //
@@ -1165,26 +1169,30 @@ class bt_dict_consumer : private bt_list_consumer {
         for (size_t x = k.size(); x >= 10; x /= 10)
             msgend--;
 
-        msg = {reinterpret_cast<const Char*>(start), static_cast<size_t>(msgend - start)};
-        sig = consume_string_view<Char>();
+        msg = {start, static_cast<size_t>(msgend - start)};
+        sig = consume_string_view();
 
         return ret;
     }
 
-    template <basic_char CharT = char>
-    std::tuple<const_span<CharT>, const_span<CharT>, const_span<CharT>> next_signature_span() {
-        std::tuple<const_span<CharT>, const_span<CharT>, const_span<CharT>> ret;
+    /// Same as next_signature_view(), except that it returns a tuple where the first element is the
+    /// string_view key, and the second and third are std::span<const Char>s containing the message
+    /// and signature.
+    template <basic_char Char>
+    std::tuple<std::string_view, std::span<const Char>, std::span<const Char>>
+    next_signature_span() {
+        std::tuple<std::string_view, std::span<const Char>, std::span<const Char>> ret;
         auto& [k, msg, sig] = ret;
 
-        k = key_span<CharT>();
+        k = key();
 
         const char* msgend = data.data() - k.size() - 2;
 
         for (size_t x = k.size(); x >= 10; x /= 10)
             msgend--;
 
-        msg = {reinterpret_cast<const CharT*>(start), static_cast<size_t>(msgend - start)};
-        sig = consume_span<CharT>();
+        msg = {reinterpret_cast<const Char*>(start), static_cast<size_t>(msgend - start)};
+        sig = consume_span<Char>();
 
         return ret;
     }
@@ -1241,19 +1249,13 @@ class bt_dict_consumer : private bt_list_consumer {
     ///         value = d.consume_string();
     ///
 
-    template <typename Char = char>
+    template <basic_char Char>
     auto consume_span() {
         return next_span<Char>().second;
     }
 
-    template <basic_char Char = char>
-    auto consume_string_view() {
-        return next_string<Char>().second;
-    }
-    template <basic_char Char = char>
-    auto consume_string() {
-        return std::basic_string<Char>{consume_string_view<Char>()};
-    }
+    std::string_view consume_string_view() { return next_string().second; }
+    std::string consume_string() { return std::string{consume_string_view()}; }
 
     template <typename IntType>
     auto consume_integer() {
@@ -1280,54 +1282,45 @@ class bt_dict_consumer : private bt_list_consumer {
         next_dict(dict);
     }
 
-    template <basic_char Char = char>
-    std::basic_string_view<Char> consume_list_data() {
-        return next_list_data<Char>().second;
-    }
-    template <basic_char Char = char>
-    std::basic_string_view<Char> consume_dict_data() {
-        return next_dict_data<Char>().second;
-    }
+    std::string_view consume_list_data() { return next_list_data().second; }
+    std::string_view consume_dict_data() { return next_dict_data().second; }
 
     /// Shortcut for wrapping `consume_list_data()` in a new list consumer
-    bt_list_consumer consume_list_consumer() { return consume_list_data(); }
+    bt_list_consumer consume_list_consumer() { return bt_list_consumer{consume_list_data()}; }
     /// Shortcut for wrapping `consume_dict_data()` in a new dict consumer
-    bt_dict_consumer consume_dict_consumer() { return consume_dict_data(); }
+    bt_dict_consumer consume_dict_consumer() { return bt_dict_consumer{consume_dict_data()}; }
 
-    /// Consumes and verifies a signature.  This method, unlike the above consume_ functions, is
-    /// a little different from its `next_signature` counterpart: it returns nothing, but takes
-    /// a verification function to call with the expected message data and signature.  The
-    /// VerifyFunc should take two arguments, such as:
+    /// Consumes and verifies a signature.  This method, unlike the above consume_ functions, is a
+    /// little different from its `next_signature` counterpart: it returns nothing, but takes a
+    /// verification function to call with the expected message data and signature.  The VerifyFunc
+    /// should take two string view, two unsigned char span, or two byte span arguments.
     ///
-    ///     void verifier(std::string_view msg, std::string_view sig);
-    ///     void verifier(std::basic_string_view<Char> msg, std::basic_string_view<Char> sig);
-    ///
-    /// with allowed `Char` types of `char`, `unsigned char` or `std::byte`.
-    ///
-    /// The first paramter is the allegedly signed message (i.e. already-consumed dict data),
-    /// and the second argument is the signature.
+    /// The first parameter is the allegedly signed message (i.e. already-consumed dict data), and
+    /// the second argument is the signature.
     ///
     /// The VerifyFunc return value must be void; non-void returning functions are explicitly
-    /// disallowed to prevent accidentally passing a bool-return verification function.  The
-    /// verify function may throw if desired (the exception is not caught and will propagate
-    /// back to the consume_signature() caller).
+    /// disallowed to prevent accidentally passing a bool-return verification function.  The verify
+    /// function may throw if desired (the exception is not caught and will propagate back to the
+    /// consume_signature() caller).
     ///
     /// Does not return a value (if the signature needs to be stored then the callback can
     /// copy/store it).
-    template <detail::void_return_func VerifyFunc>
+    template <detail::void_invocable<std::string_view, std::string_view> VerifyFunc>
     void consume_signature(VerifyFunc verify) {
-        using traits = detail::function_traits<VerifyFunc>;
-        using InputT = typename traits::template argument_type<0>;
-        using CharT = typename InputT::value_type;
-
-        if constexpr (detail::char_view_type<InputT>) {
-            auto [k, msg, sig] = next_signature_view<CharT>();
-            verify(std::move(msg), std::move(sig));
-        } else {
-            static_assert(detail::const_span_type<InputT>);
-            auto [k, msg, sig] = next_signature_span<CharT>();
-            verify(std::move(msg), std::move(sig));
-        }
+        auto [k, msg, sig] = next_signature_view();
+        verify(std::move(msg), std::move(sig));
+    }
+    template <detail::void_invocable<std::span<const unsigned char>, std::span<const unsigned char>>
+                      VerifyFunc>
+    void consume_signature(VerifyFunc verify) {
+        auto [k, msg, sig] = next_signature_span<unsigned char>();
+        verify(std::move(msg), std::move(sig));
+    }
+    template <detail::void_invocable<std::span<const std::byte>, std::span<const std::byte>>
+                      VerifyFunc>
+    void consume_signature(VerifyFunc verify) {
+        auto [k, msg, sig] = next_signature_span<std::byte>();
+        verify(std::move(msg), std::move(sig));
     }
 
     /// Consumes a value into the given type (string_view, string, integer, bt_dict_consumer,
@@ -1349,7 +1342,7 @@ class bt_dict_consumer : private bt_list_consumer {
     /// Advances to and requires the given key (as if by calling `required()`) and then throws
     /// if the key was not found; otherwise calls consume_signature() with the given
     /// verification function to verify the signature value against the prior dict data.
-    template <detail::void_return_func VerifyFunc>
+    template <detail::verify_func VerifyFunc>
     void require_signature(std::string_view key, VerifyFunc&& verify) {
         required(key);
         return consume_signature(std::forward<VerifyFunc>(verify));
@@ -1386,7 +1379,7 @@ class bt_dict_consumer : private bt_list_consumer {
 };
 
 inline bt_dict_consumer bt_list_consumer::consume_dict_consumer() {
-    return consume_dict_data();
+    return bt_dict_consumer{consume_dict_data()};
 }
 
 namespace detail {

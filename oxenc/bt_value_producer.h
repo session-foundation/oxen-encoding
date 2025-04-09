@@ -1,8 +1,8 @@
 #include <type_traits>
+#include <variant>
 
 #include "bt_producer.h"
 #include "bt_value.h"
-#include "variant.h"
 
 /// This header provides the implementations of append_bt(bt_value/bt_list/bt_dict) for
 /// bt_serialize.  (It is optional to avoid unnecessary includes when not wanted).
@@ -53,12 +53,12 @@ namespace detail {
 
     inline void serialize_dict(bt_dict_producer& out, const bt_dict& d) {
         for (const auto& [k, v] : d)
-            var::visit(dict_appender{out, k}, static_cast<const bt_variant&>(v));
+            std::visit(dict_appender{out, k}, static_cast<const bt_variant&>(v));
     }
 
     inline void serialize_list(bt_list_producer& out, const bt_list& l) {
         for (auto& val : l)
-            var::visit(list_appender{out}, static_cast<const bt_variant&>(val));
+            std::visit(list_appender{out}, static_cast<const bt_variant&>(val));
     }
 }  // namespace detail
 
@@ -76,7 +76,7 @@ inline void bt_list_producer::append_bt(const bt_list& bt) {
 
 template <>
 inline void bt_list_producer::append_bt(const bt_value& bt) {
-    var::visit(detail::list_appender{*this}, static_cast<const bt_variant&>(bt));
+    std::visit(detail::list_appender{*this}, static_cast<const bt_variant&>(bt));
 }
 
 template <>
@@ -93,6 +93,6 @@ inline void bt_dict_producer::append_bt(std::string_view key, const bt_list& bt)
 
 template <>
 inline void bt_dict_producer::append_bt(std::string_view key, const bt_value& bt) {
-    var::visit(detail::dict_appender{*this, key}, static_cast<const bt_variant&>(bt));
+    std::visit(detail::dict_appender{*this, key}, static_cast<const bt_variant&>(bt));
 }
 }  // namespace oxenc

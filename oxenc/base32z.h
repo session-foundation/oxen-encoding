@@ -3,11 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include "byte_type.h"
-#include "span.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -54,13 +55,13 @@ namespace detail {
 
 /// Returns the number of characters required to encode a base32z string from the given number of
 /// bytes.
-inline constexpr size_t to_base32z_size(size_t byte_size) {
+constexpr size_t to_base32z_size(size_t byte_size) {
     return (byte_size * 8 + 4) / 5;
 }  // ⌈bits/5⌉ because 5 bits per byte
 
 /// Returns the number of bytes required to decode a base32z string of the given size.  Returns 0
 /// if the given size is not a valid base32z encoded string length.
-inline constexpr size_t from_base32z_size(size_t b32z_size) {
+constexpr size_t from_base32z_size(size_t b32z_size) {
     size_t bits = b32z_size * 5;
     return bits % 8 < 5 ? bits / 8 : 0;  // 5+ unused bits means we have an invalid extra character
 }  // ⌊bits/8⌋
@@ -130,7 +131,7 @@ struct base32z_encoder final {
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base32z
 /// character).
 template <typename InputIt, typename OutputIt>
-OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
+constexpr OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base32z requires chars/bytes");
     base32z_encoder it{begin, end};
     return std::copy(it, it.end(), out);
@@ -140,9 +141,7 @@ OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string to_base32z(It begin, It end) {
     std::string base32z;
-    if constexpr (std::is_base_of_v<
-                          std::random_access_iterator_tag,
-                          typename std::iterator_traits<It>::iterator_category>) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         base32z.reserve(to_base32z_size(static_cast<size_t>(distance(begin, end))));
     }
@@ -150,21 +149,14 @@ std::string to_base32z(It begin, It end) {
     return base32z;
 }
 
-/// Creates a base32z string from an iterable, std::string-like object
-template <basic_char CharT>
-std::string to_base32z(std::basic_string_view<CharT> s) {
-    return to_base32z(s.begin(), s.end());
-}
+/// Creates a base32z string from string_view (or compatible), or unsigned char/std::byte span
 inline std::string to_base32z(std::string_view s) {
-    return to_base32z<>(s);
-}
-template <basic_char CharT>
-std::string to_base32z(const std::basic_string<CharT>& s) {
     return to_base32z(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string to_base32z(std::span<CharT> s) {
+inline std::string to_base32z(std::span<const unsigned char> s) {
+    return to_base32z(s.begin(), s.end());
+}
+inline std::string to_base32z(std::span<const std::byte> s) {
     return to_base32z(s.begin(), s.end());
 }
 
@@ -175,10 +167,7 @@ template <typename It>
 constexpr bool is_base32z(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_base32z requires chars/bytes");
     size_t count = 0;
-    constexpr bool random = std::is_base_of_v<
-            std::random_access_iterator_tag,
-            typename std::iterator_traits<It>::iterator_category>;
-    if constexpr (random) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         count = static_cast<size_t>(distance(begin, end) % 8);
         if (count == 1 || count == 3 || count == 6)  // see below
@@ -188,7 +177,7 @@ constexpr bool is_base32z(It begin, It end) {
         auto c = static_cast<unsigned char>(*begin);
         if (detail::b32z_lut.from_b32z(c) == 0 && !(c == 'y' || c == 'Y'))
             return false;
-        if constexpr (!random)
+        if constexpr (!std::random_access_iterator<It>)
             count++;
     }
     // Check for a valid length.
@@ -197,29 +186,20 @@ constexpr bool is_base32z(It begin, It end) {
     // - 5n + 2 bytes encodes to 8n+4 chars (last 4 bits are padding)
     // - 5n + 3 bytes encodes to 8n+5 chars (last 1 bit is padding)
     // - 5n + 4 bytes encodes to 8n+7 chars (last 3 bits are padding)
-    if constexpr (!random)
+    if constexpr (!std::random_access_iterator<It>)
         if (count %= 8; count == 1 || count == 3 || count == 6)
             return false;
     return true;
 }
 
 /// Returns true if all elements in the string-like value are base32z characters
-template <basic_char CharT>
-constexpr bool is_base32z(std::basic_string_view<CharT> s) {
-    return is_base32z(s.begin(), s.end());
-}
-
 constexpr bool is_base32z(std::string_view s) {
-    return is_base32z<>(s);
-}
-
-template <basic_char CharT>
-constexpr bool is_base32z(const std::basic_string<CharT>& s) {
     return is_base32z(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-constexpr bool is_base32z(std::span<CharT> s) {
+constexpr bool is_base32z(std::span<const unsigned char> s) {
+    return is_base32z(s.begin(), s.end());
+}
+constexpr bool is_base32z(std::span<const std::byte> s) {
     return is_base32z(s.begin(), s.end());
 }
 
@@ -318,9 +298,7 @@ constexpr OutputIt from_base32z(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_base32z(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<
-                          std::random_access_iterator_tag,
-                          typename std::iterator_traits<It>::iterator_category>) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         bytes.reserve(from_base32z_size(static_cast<size_t>(distance(begin, end))));
     }
@@ -330,22 +308,13 @@ std::string from_base32z(It begin, It end) {
 
 /// Converts base32z digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid (case-insensitive) base32z characters.
-template <basic_char CharT>
-std::string from_base32z(std::basic_string_view<CharT> s) {
-    return from_base32z(s.begin(), s.end());
-}
-
 inline std::string from_base32z(std::string_view s) {
-    return from_base32z<>(s);
-}
-
-template <basic_char CharT>
-std::string from_base32z(const std::basic_string<CharT>& s) {
     return from_base32z(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string from_base32z(std::span<CharT> s) {
+inline std::string from_base32z(std::span<const unsigned char> s) {
+    return from_base32z(s.begin(), s.end());
+}
+inline std::string from_base32z(std::span<const std::byte> s) {
     return from_base32z(s.begin(), s.end());
 }
 
@@ -363,8 +332,6 @@ namespace detail {
         Char decoded[size + 1];
 
         bool valid;
-
-        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
     template <size_t N>
     struct c_b32z_literal : b32z_literal<char, N> {
@@ -382,21 +349,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b32z_literal Base32z>
-    constexpr auto operator""_b32z() {
+    constexpr std::string_view operator""_b32z() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.span();
+        return {Base32z.decoded, Base32z.size};
     }
 
     template <detail::b_b32z_literal Base32z>
-    constexpr auto operator""_b32z_b() {
+    constexpr std::span<const std::byte> operator""_b32z_b() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.span();
+        return {Base32z.decoded, Base32z.size};
     }
 
     template <detail::u_b32z_literal Base32z>
-    constexpr auto operator""_b32z_u() {
+    constexpr std::span<const unsigned char> operator""_b32z_u() {
         static_assert(Base32z.valid, "invalid base32z literal");
-        return Base32z.span();
+        return {Base32z.decoded, Base32z.size};
     }
 }  // namespace literals
 

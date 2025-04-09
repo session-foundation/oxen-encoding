@@ -28,8 +28,8 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE(oxenc::from_hex("12345678ffEDbca9") == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
     REQUIRE("12345678ffEDbca9"_hex == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s);
-    REQUIRE("12345678ffEDbca9"_hex_b == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_bsp);
-    REQUIRE("12345678ffEDbca9"_hex_u == "\x12\x34\x56\x78\xff\xed\xbc\xa9"_usp);
+    REQUIRE(view("12345678ffEDbca9"_hex_b) == "\x12\x34\x56\x78\xff\xed\xbc\xa9"sv);
+    REQUIRE(view("12345678ffEDbca9"_hex_u) == "\x12\x34\x56\x78\xff\xed\xbc\xa9"sv);
     // These should not compile:
     //"abc"_hex;
     //"abcg"_hex;
@@ -54,7 +54,7 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     std::vector<std::byte> bytes{
             {std::byte{0xff}, std::byte{0x42}, std::byte{0x12}, std::byte{0x34}}};
-    const_span<std::byte> b{bytes.data(), bytes.size()};
+    std::span<const std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_hex(b) == "ff421234"s);
 
     // In-place decoding and truncation via to_hex's returned iterator:
@@ -77,7 +77,7 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     bytes[5] = std::byte{'2'};
     bytes[6] = std::byte{'3'};
     bytes[7] = std::byte{'4'};
-    const_span<std::byte> hex_bytes{bytes.data(), bytes.size()};
+    std::span<const std::byte> hex_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_hex(hex_bytes));
     REQUIRE(oxenc::from_hex(hex_bytes) == "\xff\x42\x12\x34");
 
@@ -104,12 +104,14 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE(oxenc::from_base32z("YRTWK3HJIXG66YJDEIUAUK6P7HY1GTM8TGIH55ABRPNSXNPM3ZZO") ==
             "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv);
 
-    REQUIRE("yrtwk3hjixg66yjdeiuauk6p7hy1gtm8tgih55abrpnsxnpm3zzo"_b32z ==
-            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"_csp);
-    REQUIRE("YRTWK3HJIXG66YJDEIUAUK6P7HY1GTM8TGIH55ABRPNSXNPM3ZZO"_b32z ==
-            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"_csp);
-    REQUIRE("pb1sa5dx"_b32z_b == "hello"_bsp);
-    REQUIRE("pb1sa5dx"_b32z_u == "hello"_usp);
+    REQUIRE(view("yrtwk3hjixg66yjdeiuauk6p7hy1gtm8tgih55abrpnsxnpm3zzo"_b32z) ==
+            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89"
+            "\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef");
+    REQUIRE(view("YRTWK3HJIXG66YJDEIUAUK6P7HY1GTM8TGIH55ABRPNSXNPM3ZZO"_b32z) ==
+            "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89"
+            "\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef");
+    REQUIRE(view("pb1sa5dx"_b32z_b) == "hello");
+    REQUIRE(view("pb1sa5dx"_b32z_u) == "hello");
     // None of these should compile:
     // "abcl"_b32z;  // invalid character l
     // "abc"_b32z;  // invalid length (b32 string length % 8 cannot be 1, 3, or 6)
@@ -166,7 +168,7 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE(hellob32z == "jb1sa5dx!");
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
-    const_span<std::byte> b{bytes.data(), bytes.size()};
+    std::span<const std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_base32z(b) == "yd9o");
 
     bytes.resize(4);
@@ -174,7 +176,7 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     bytes[1] = std::byte{'d'};
     bytes[2] = std::byte{'9'};
     bytes[3] = std::byte{'o'};
-    const_span<std::byte> b32_bytes{bytes.data(), bytes.size()};
+    std::span<const std::byte> b32_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_base32z(b32_bytes));
     REQUIRE(oxenc::from_base32z(b32_bytes) == "\x00\xff"sv);
 
@@ -289,10 +291,10 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
             "continued and indefatigable generation of knowledge, exceeds the short vehemence of "
             "any carnal pleasure.");
 
-    REQUIRE("SGVsbG8="_b64 == "Hello"_csp);
-    REQUIRE("SGVsbG8"_b64 == "Hello"_csp);
-    REQUIRE("SGVsbG8"_b64_b == "Hello"_bsp);
-    REQUIRE("SGVsbG8"_b64_u == "Hello"_usp);
+    CHECK(view("SGVsbG8="_b64) == "Hello");
+    CHECK(view("SGVsbG8"_b64) == "Hello");
+    CHECK(view("SGVsbG8"_b64_b) == "Hello");
+    CHECK(view("SGVsbG8"_b64_u) == "Hello");
     // None of these should compile:
     // "SGVsbG8$"_b64;
     // "ABCDE==="_b64;
@@ -323,7 +325,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE(hellob64 == "SGVsbG8=!");
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
-    const_span<std::byte> b{bytes.data(), bytes.size()};
+    std::span<const std::byte> b{bytes.data(), bytes.size()};
     REQUIRE(oxenc::to_base64(b) == "AP8=");
 
     bytes.resize(4);
@@ -331,7 +333,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     bytes[1] = std::byte{'w'};
     bytes[2] = std::byte{'A'};
     bytes[3] = std::byte{'='};
-    const_span<std::byte> b64_bytes{bytes.data(), bytes.size()};
+    std::span<const std::byte> b64_bytes{bytes.data(), bytes.size()};
     REQUIRE(oxenc::is_base64(b64_bytes));
     REQUIRE(oxenc::from_base64(b64_bytes) == "\xff\x00"sv);
 
@@ -490,7 +492,7 @@ TEST_CASE("std::byte decoding", "[decoding][hex][base32z][base64]") {
 
 TEST_CASE("append_encoded", "[encoding][decoding]") {
 
-    auto pre_encoded = "d1:a3:fooe"_csp;
+    auto pre_encoded = "d1:a3:fooe";
 
     oxenc::bt_list_producer btlp;
 
@@ -510,9 +512,9 @@ TEST_CASE("append_encoded", "[encoding][decoding]") {
 
     btdp.append_encoded("dict"sv, pre_encoded);
 
-    auto encoded_dict = btdp.span();
+    auto encoded_dict = btdp.span<std::byte>();
 
-    CHECK(encoded_dict == "d4:dictd1:a3:fooee"_csp);
+    CHECK(view(encoded_dict) == "d4:dictd1:a3:fooee");
 
     CHECK_NOTHROW(oxenc::bt_dict_consumer{encoded_dict});
     oxenc::bt_dict_consumer btdc{"d4:dictd1:a3:fooee"};

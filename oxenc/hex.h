@@ -3,11 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <span>
 #include <string>
 #include <string_view>
 
 #include "byte_type.h"
-#include "span.h"
+#include "common.h"
 
 namespace oxenc {
 
@@ -42,12 +43,12 @@ namespace detail {
 }  // namespace detail
 
 /// Returns the number of characters required to encode a hex string from the given number of bytes.
-inline constexpr size_t to_hex_size(size_t byte_size) {
+constexpr size_t to_hex_size(size_t byte_size) {
     return byte_size * 2;
 }
 /// Returns the number of bytes required to decode a hex string of the given size.  Returns 0 if the
 /// input is not a valid hex string size (i.e. for odd sizes).
-inline constexpr size_t from_hex_size(size_t hex_size) {
+constexpr size_t from_hex_size(size_t hex_size) {
     return hex_size % 2 ? 0 : hex_size / 2;
 }
 
@@ -108,9 +109,7 @@ constexpr OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string to_hex(It begin, It end) {
     std::string hex;
-    if constexpr (std::is_base_of_v<
-                          std::random_access_iterator_tag,
-                          typename std::iterator_traits<It>::iterator_category>) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         hex.reserve(to_hex_size(static_cast<size_t>(distance(begin, end))));
     }
@@ -118,24 +117,14 @@ std::string to_hex(It begin, It end) {
     return hex;
 }
 
-/// Creates a hex string from an iterable, std::string-like object
-template <basic_char Char>
-std::string to_hex(std::span<Char> s) {
-    return to_hex(s.begin(), s.end());
-}
-
-/// Creates a hex string from an iterable, std::string-like object
-template <basic_char CharT>
-std::string to_hex(std::basic_string_view<CharT> s) {
-    return to_hex(s.begin(), s.end());
-}
-
+/// Creates a hex string from an string_view (or compatible), or byte span
 inline std::string to_hex(std::string_view s) {
-    return to_hex<>(s);
+    return to_hex(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string to_hex(const std::basic_string<CharT>& s) {
+inline std::string to_hex(std::span<const unsigned char> s) {
+    return to_hex(s.begin(), s.end());
+}
+inline std::string to_hex(std::span<const std::byte> s) {
     return to_hex(s.begin(), s.end());
 }
 
@@ -152,10 +141,7 @@ constexpr bool is_hex_digit(CharT c) {
 template <typename It>
 constexpr bool is_hex(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_hex requires chars/bytes");
-    constexpr bool ra = std::is_base_of_v<
-            std::random_access_iterator_tag,
-            typename std::iterator_traits<It>::iterator_category>;
-    if constexpr (ra) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         if (distance(begin, end) % 2 != 0)
             return false;
@@ -163,34 +149,24 @@ constexpr bool is_hex(It begin, It end) {
 
     size_t count = 0;
     for (; begin != end; ++begin) {
-        if constexpr (!ra)
+        if constexpr (!std::random_access_iterator<It>)
             ++count;
         if (!is_hex_digit(*begin))
             return false;
     }
-    if constexpr (!ra)
+    if constexpr (!std::random_access_iterator<It>)
         return count % 2 == 0;
     return true;
 }
 
-/// Returns true if all elements in the string-like value are hex characters
-template <basic_char CharT>
-constexpr bool is_hex(std::span<CharT> s) {
-    return is_hex(s.begin(), s.end());
-}
-
-/// Returns true if all elements in the string-like value are hex characters
-template <basic_char CharT>
-constexpr bool is_hex(std::basic_string_view<CharT> s) {
-    return is_hex(s.begin(), s.end());
-}
-
-template <basic_char CharT>
-constexpr bool is_hex(const std::basic_string<CharT>& s) {
-    return is_hex(s.begin(), s.end());
-}
-
+/// Returns true if all elements in the string-like value (or byte span) are hex characters
 constexpr bool is_hex(std::string_view s) {
+    return is_hex(s.begin(), s.end());
+}
+constexpr bool is_hex(std::span<const unsigned char> s) {
+    return is_hex(s.begin(), s.end());
+}
+constexpr bool is_hex(std::span<const std::byte> s) {
     return is_hex(s.begin(), s.end());
 }
 
@@ -272,9 +248,7 @@ constexpr OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_hex(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<
-                          std::random_access_iterator_tag,
-                          typename std::iterator_traits<It>::iterator_category>) {
+    if constexpr (std::random_access_iterator<It>) {
         using std::distance;
         bytes.reserve(from_hex_size(static_cast<size_t>(distance(begin, end))));
     }
@@ -284,24 +258,13 @@ std::string from_hex(It begin, It end) {
 
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-template <basic_char CharT>
-std::string from_hex(std::span<CharT> s) {
-    return from_hex(s.begin(), s.end());
-}
-
-/// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
-/// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-template <basic_char CharT>
-std::string from_hex(std::basic_string_view<CharT> s) {
-    return from_hex(s.begin(), s.end());
-}
-
 inline std::string from_hex(std::string_view s) {
     return from_hex(s.begin(), s.end());
 }
-
-template <basic_char CharT>
-std::string from_hex(const std::basic_string<CharT>& s) {
+inline std::string from_hex(std::span<const unsigned char> s) {
+    return from_hex(s.begin(), s.end());
+}
+inline std::string from_hex(std::span<const std::byte> s) {
     return from_hex(s.begin(), s.end());
 }
 
@@ -318,8 +281,6 @@ namespace detail {
         static inline constexpr size_t size{N / 2};
         Char decoded[size + 1];  // Includes a null byte so that span().data() is a valid c string
         bool valid;
-
-        constexpr const_span<const Char> span() const { return {decoded, size}; }
     };
 
     template <size_t N>
@@ -344,15 +305,15 @@ inline namespace literals {
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr auto operator""_hex_b() {
+    constexpr std::span<const std::byte> operator""_hex_b() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.span();
+        return {Hex.decoded, Hex.size};
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr auto operator""_hex_u() {
+    constexpr std::span<const unsigned char> operator""_hex_u() {
         static_assert(Hex.valid, "invalid hex literal");
-        return Hex.span();
+        return {Hex.decoded, Hex.size};
     }
 }  // namespace literals
 

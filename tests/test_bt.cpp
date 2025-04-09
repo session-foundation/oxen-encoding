@@ -130,10 +130,10 @@ TEST_CASE("bt_value serialization", "[bt][serialization][bt_value]") {
 TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
     auto dna1 = bt_deserialize<bt_value>("i42e");
     auto dna2 = bt_deserialize<bt_value>("i-42e");
-    REQUIRE(var::get<uint64_t>(dna1) == 42);
-    REQUIRE(var::get<int64_t>(dna2) == -42);
-    REQUIRE_THROWS(var::get<int64_t>(dna1));
-    REQUIRE_THROWS(var::get<uint64_t>(dna2));
+    REQUIRE(std::get<uint64_t>(dna1) == 42);
+    REQUIRE(std::get<int64_t>(dna2) == -42);
+    REQUIRE_THROWS(std::get<int64_t>(dna1));
+    REQUIRE_THROWS(std::get<uint64_t>(dna2));
     REQUIRE(oxenc::get_int<int>(dna1) == 42);
     REQUIRE(oxenc::get_int<int>(dna2) == -42);
     REQUIRE(oxenc::get_int<unsigned>(dna1) == 42);
@@ -141,19 +141,19 @@ TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
 
     bt_value x = bt_deserialize<bt_value>("d3:barle3:foold1:ali1ei2ei3ee1:bleed1:cli-5ei4eeeee");
     REQUIRE(std::holds_alternative<bt_dict>(x));
-    bt_dict& a = var::get<bt_dict>(x);
+    bt_dict& a = std::get<bt_dict>(x);
     REQUIRE(a.count("bar"));
     REQUIRE(a.count("foo"));
     REQUIRE(a.size() == 2);
-    bt_list& foo = var::get<bt_list>(a["foo"]);
+    bt_list& foo = std::get<bt_list>(a["foo"]);
     REQUIRE(foo.size() == 2);
-    bt_dict& foo1 = var::get<bt_dict>(foo.front());
-    bt_dict& foo2 = var::get<bt_dict>(foo.back());
+    bt_dict& foo1 = std::get<bt_dict>(foo.front());
+    bt_dict& foo2 = std::get<bt_dict>(foo.back());
     REQUIRE(foo1.size() == 2);
     REQUIRE(foo2.size() == 1);
-    bt_list& foo1a = var::get<bt_list>(foo1.at("a"));
-    bt_list& foo1b = var::get<bt_list>(foo1.at("b"));
-    bt_list& foo2c = var::get<bt_list>(foo2.at("c"));
+    bt_list& foo1a = std::get<bt_list>(foo1.at("a"));
+    bt_list& foo1b = std::get<bt_list>(foo1.at("b"));
+    bt_list& foo2c = std::get<bt_list>(foo2.at("c"));
     std::list<int> foo1a_vals, foo1b_vals, foo2c_vals;
     for (auto& v : foo1a)
         foo1a_vals.push_back(oxenc::get_int<int>(v));
@@ -165,7 +165,7 @@ TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
     REQUIRE(foo1b_vals == std::list<int>{});
     REQUIRE(foo2c_vals == std::list{{-5, 4}});
 
-    REQUIRE(var::get<bt_list>(a.at("bar")).empty());
+    REQUIRE(std::get<bt_list>(a.at("bar")).empty());
 }
 
 TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
@@ -393,31 +393,27 @@ TEST_CASE("bt streaming dict producer", "[bt][dict][producer]") {
     }
 }
 
-template <typename Char>
-std::basic_string_view<Char> to_sv(std::string_view x) {
-    return {reinterpret_cast<const Char*>(x.data()), x.size()};
-}
-
-TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer][consumer]") {
-    auto char_sp =
-            "on some tuesdays i prefer to have my afternoon tea au naturale in the foyer"_csp;
-    auto uchar_sp =
-            "however, my recurring nightmares w/r/t the neighbor's cat prevent full immersion"_usp;
-    auto bchar_sp =
-            "yet still i absolutely persist, not just because it is right, but because i must!"_bsp;
+TEST_CASE("serialize/deserialize const spans", "[bt][list][dict][value][producer][consumer]") {
+    auto char_str = "on some tuesdays i prefer to have my afternoon tea au naturale in the foyer"sv;
+    auto uchar_str =
+            "however, my recurring nightmares w/r/t the neighbor's cat prevent full immersion"sv;
+    auto bchar_str =
+            "yet still i absolutely persist, not just because it is right, but because i must!"sv;
+    auto uchar_sp = to_span<unsigned char>(uchar_str);
+    auto bchar_sp = to_span<std::byte>(bchar_str);
 
     std::string buf;
 
     {
         bt_dict_producer btdp;
-        btdp.append("a", char_sp);
+        btdp.append("a", char_str);
 
         {
             auto btlp = btdp.append_list("b");
 
             btlp.append(bchar_sp);
             btlp.append(uchar_sp);
-            btlp.append(char_sp);
+            btlp.append(char_str);
         }
 
         btdp.append("c", uchar_sp);
@@ -436,20 +432,20 @@ TEST_CASE("serialize/deserialize const_spans", "[bt][list][dict][value][producer
 
     bt_dict_consumer btdc{buf};
 
-    CHECK(btdc.next_span<char>().second == char_sp);
+    CHECK(view(btdc.next_span<char>().second) == char_str);
 
     {
         auto sublist = btdc.consume_list_consumer();
 
-        CHECK(bchar_sp == sublist.consume_span<std::byte>());
-        CHECK(uchar_sp == sublist.consume_span<unsigned char>());
-        CHECK(char_sp == sublist.consume_span<char>());
+        CHECK(bchar_str == view(sublist.consume_span<std::byte>()));
+        CHECK(uchar_str == view(sublist.consume_span<unsigned char>()));
+        CHECK(char_str == view(sublist.consume_span<char>()));
 
         CHECK(sublist.is_finished());
     }
 
-    CHECK(uchar_sp == btdc.require<const_span<unsigned char>>("c"));
-    CHECK(bchar_sp == btdc.require<const_span<std::byte>>("d"));
+    CHECK(uchar_str == view(btdc.require<std::span<const unsigned char>>("c")));
+    CHECK(bchar_str == view(btdc.require<std::span<const std::byte>>("d")));
 }
 
 TEST_CASE("bt_producer/bt_value combo", "[bt][dict][value][producer]") {
@@ -525,8 +521,8 @@ TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
     }
 
     SECTION("Success cases - string conversion types") {
-        const_span<unsigned char> ustr;
-        REQUIRE_NOTHROW(ustr = btdp.require<const_span<unsigned char>>("E"));
+        std::span<const unsigned char> ustr;
+        REQUIRE_NOTHROW(ustr = btdp.require<std::span<const unsigned char>>("E"));
     }
 }
 
@@ -539,35 +535,35 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
     l.append("c");
     l.append("d");
 
-    d.append_signature("~1", [](const_span<char> to_sign) {
-        CHECK(to_sign == "d1:ai1e1:b1:2"sv);
+    d.append_signature("~1", [](std::span<const char> to_sign) {
+        CHECK(view(to_sign) == "d1:ai1e1:b1:2");
         return "sig1"sv;
     });
-    d.append_signature("~2", [](const_span<std::byte> to_sign) {
-        CHECK(to_sign == "d1:ai1e1:b1:22:~14:sig1"_bsp);
+    d.append_signature("~2", [](std::span<const std::byte> to_sign) {
+        CHECK(view(to_sign) == "d1:ai1e1:b1:22:~14:sig1");
         return "sig2"sv;
     });
 
     std::array<unsigned char, 4> sigoutside{{0x73, 0x69, 0x67, 0x33}};
 
-    d.append_signature("~3", [&sigoutside](const_span<unsigned char> to_sign) {
-        CHECK(to_sign == "d1:ai1e1:b1:22:~14:sig12:~24:sig2"_usp);
+    d.append_signature("~3", [&sigoutside](std::span<const unsigned char> to_sign) {
+        CHECK(view(to_sign) == "d1:ai1e1:b1:22:~14:sig12:~24:sig2");
         return sigoutside;
     });
 
     CHECK(d.view() == "d1:ai1e1:b1:22:~14:sig12:~24:sig22:~34:sig3e");
 
-    l.append_signature([](const const_span<char> to_sign) {
-        CHECK(to_sign == "l1:c1:d"sv);
-        return "sig"_csp;
+    l.append_signature([](const std::span<const unsigned char> to_sign) {
+        CHECK(view(to_sign) == "l1:c1:d"sv);
+        return std::array{(unsigned char)'s', (unsigned char)'i', (unsigned char)'g'};
     });
-    l.append_signature([](const const_span<char>& to_sign) {
-        CHECK(to_sign == "l1:c1:d3:sig"sv);
-        return "sig2"_bsp;
+    l.append_signature([](const std::span<const unsigned char>& to_sign) {
+        CHECK(view(to_sign) == "l1:c1:d3:sig"sv);
+        return std::array{std::byte{'s'}, std::byte{'i'}, std::byte{'g'}, std::byte{'2'}};
     });
-    l.append_signature([](const_span<char> to_sign) {
-        CHECK(to_sign == "l1:c1:d3:sig4:sig2"sv);
-        return "sig3"_usp;
+    l.append_signature([](std::span<const std::byte> to_sign) {
+        CHECK(view(to_sign) == "l1:c1:d3:sig4:sig2"sv);
+        return "sig3";
     });
 
     CHECK(l.view() == "l1:c1:d3:sig4:sig24:sig3e");
@@ -580,20 +576,22 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
     CHECK(msg == "d1:ai1e1:b1:2");
     CHECK(sig == "sig1");
     CHECK(dc.skip_until("~2"sv));
-    REQUIRE_NOTHROW(dc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
-        if (msg != "d1:ai1e1:b1:22:~14:sig1"_bsp)
-            throw std::runtime_error{"bad msg"};
-        if (sig != "sig2"_bsp)
-            throw std::runtime_error{"bad sig"};
-    }));
+    REQUIRE_NOTHROW(dc.consume_signature(
+            [](std::span<const std::byte> msg, std::span<const std::byte> sig) {
+                if (view(msg) != "d1:ai1e1:b1:22:~14:sig1")
+                    throw std::runtime_error{"bad msg"};
+                if (view(sig) != "sig2")
+                    throw std::runtime_error{"bad sig"};
+            }));
 
-    CHECK_THROWS(dc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
-        CHECK(msg == "d1:ai1e1:b1:22:~14:sig12:~24:sig2"_bsp);
-        CHECK(sig == "sig3"_bsp);
-        throw std::runtime_error{"test throw"};
-    }));
+    CHECK_THROWS(dc.consume_signature(
+            [](std::span<const std::byte> msg, std::span<const std::byte> sig) {
+                CHECK(view(msg) == "d1:ai1e1:b1:22:~14:sig12:~24:sig2");
+                CHECK(view(sig) == "sig3");
+                throw std::runtime_error{"test throw"};
+            }));
 
-    dc = {d.view()};
+    dc = bt_dict_consumer{d.view()};
     dc.require_signature("~3", [](std::string_view msg, std::string_view sig) {
         CHECK(msg == "d1:ai1e1:b1:22:~14:sig12:~24:sig2");
         CHECK(sig == "sig3");
@@ -606,14 +604,15 @@ TEST_CASE("bt append_signature", "[bt][signature]") {
         CHECK(msg == "l1:c1:d");
         CHECK(sig == "sig");
     });
-    lc.consume_signature([](const_span<std::byte> msg, const_span<std::byte> sig) {
-        CHECK(msg == "l1:c1:d3:sig"_bsp);
-        CHECK(sig == "sig2"_bsp);
+    lc.consume_signature([](std::span<const std::byte> msg, std::span<const std::byte> sig) {
+        CHECK(view(msg) == "l1:c1:d3:sig");
+        CHECK(view(sig) == "sig2");
     });
-    lc.consume_signature([](const_span<unsigned char> msg, const_span<unsigned char> sig) {
-        CHECK(msg == "l1:c1:d3:sig4:sig2"_usp);
-        CHECK(sig == "sig3"_usp);
-    });
+    lc.consume_signature(
+            [](std::span<const unsigned char> msg, std::span<const unsigned char> sig) {
+                CHECK(view(msg) == "l1:c1:d3:sig4:sig2");
+                CHECK(view(sig) == "sig3");
+            });
 
     // Should not compile:
 #if 0

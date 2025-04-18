@@ -45,7 +45,7 @@ char* apple_to_chars10(char* buf, IntType val) {
     } while (val > 0);
 
     // Reverse the digits into the right order
-    int swaps = (pos - buf) / 2;
+    auto swaps = (pos - buf) / 2;
     for (int i = 0; i < swaps; i++)
         std::swap(buf[i], pos[-1 - i]);
 

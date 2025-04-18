@@ -686,11 +686,11 @@ TEST_CASE("apple to_chars workaround test", "[bt][apple][sucks]") {
     CHECK(buf_view(oxenc::apple_to_chars10(buf, -99)) == "-99");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, -1234567890)) == "-1234567890");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, char{42})) == "42");
-    CHECK(buf_view(oxenc::apple_to_chars10(buf, (unsigned char){42})) == "42");
+    CHECK(buf_view(oxenc::apple_to_chars10(buf, (unsigned char)42)) == "42");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, short{42})) == "42");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, std::numeric_limits<char>::min())) == "-128");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, std::numeric_limits<char>::max())) == "127");
-    CHECK(buf_view(oxenc::apple_to_chars10(buf, (unsigned char){42})) == "42");
+    CHECK(buf_view(oxenc::apple_to_chars10(buf, (unsigned char)42)) == "42");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, std::numeric_limits<uint64_t>::max())) ==
           "18446744073709551615");
     CHECK(buf_view(oxenc::apple_to_chars10(buf, int64_t{-1})) == "-1");

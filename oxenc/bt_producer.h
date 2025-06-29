@@ -191,6 +191,16 @@ class bt_list_producer {
         append_impl(std::string_view{reinterpret_cast<const char*>(d.data()), d.size()});
     }
 
+    template <bt_input_string... Bytes>
+    void append_concat_impl(const Bytes&... data) {
+        char buf[21];  // length + ':'
+        size_t size = (0 + ... + data.size());
+        auto* ptr = write_integer(size, buf);
+        *ptr++ = ':';
+        buffer_append(buf, static_cast<size_t>(ptr - buf));
+        (buffer_append(reinterpret_cast<const char*>(data.data()), data.size()), ...);
+    }
+
   public:
     /// Returns a span of the current serialized list values suitable for signing.  The returned
     /// value is the currently serialized list data up to but not including the terminating `e`
@@ -320,6 +330,16 @@ class bt_list_producer {
         append_intermediate_ends();
     }
 
+    /// Appends a single string value consisting of multiple binary string data inputs concatenated
+    /// together.
+    template <bt_input_string... Bytes>
+    void append_concat(const Bytes&... data) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to list when a sublist is active"};
+        append_concat_impl(data...);
+        append_intermediate_ends();
+    }
+
     /// Appends an integer (including bools)
     template <std::integral IntType>
     void append(IntType i) {
@@ -351,7 +371,7 @@ class bt_list_producer {
     template <typename ForwardIt>
     void extend(ForwardIt from, ForwardIt to) {
         if (has_child)
-            throw std::logic_error{"Cannot append to list when a sublist is active"};
+            throw std::logic_error{"Cannot append to list when a sublist/dict is active"};
         while (from != to)
             append_impl(*from++);
         append_intermediate_ends();
@@ -579,10 +599,22 @@ class bt_dict_producer : bt_list_producer {
         requires bt_input_string<T> || std::integral<T>
     void append(std::string_view key, const T& value) {
         if (has_child)
-            throw std::logic_error{"Cannot append to list when a sublist is active"};
+            throw std::logic_error{"Cannot append to dict when a sublist/dict is active"};
         check_incrementing_key(key);
         append_impl(key);
         append_impl(value);
+        append_intermediate_ends();
+    }
+
+    /// Appends a single string value pair where the value is the result of concatenation of
+    /// multiple strings.
+    template <bt_input_string... Bytes>
+    void append_concat(std::string_view key, const Bytes&... data) {
+        if (has_child)
+            throw std::logic_error{"Cannot append to dict when a sublist/dict is active"};
+        check_incrementing_key(key);
+        append_impl(key);
+        append_concat_impl(data...);
         append_intermediate_ends();
     }
 

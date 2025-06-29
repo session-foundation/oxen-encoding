@@ -526,6 +526,22 @@ TEST_CASE("Require methods", "[bt][dict][consumer][require]") {
     }
 }
 
+TEST_CASE("bt append_concat", "[bt][concat]") {
+    bt_dict_producer d;
+    bt_list_producer l;
+
+    std::vector<unsigned char> world = {'w', 'o', 'r', 'l', 'd'};
+    std::span<unsigned char, 5> sworld{world.data(), world.size()};
+    std::vector<std::byte> bang = {(std::byte)'!'};
+    d.append_concat("a", "hello"sv, " "s, sworld, bang);
+
+    CHECK(d.view() == "d1:a12:hello world!e");
+
+    l.append_concat("hell"sv, " no "s, world, bang);
+
+    CHECK(l.view() == "l14:hell no world!e");
+}
+
 TEST_CASE("bt append_signature", "[bt][signature]") {
     bt_dict_producer d;
     bt_list_producer l;

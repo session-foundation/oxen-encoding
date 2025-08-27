@@ -1,3 +1,9 @@
+oxen-encoding (1.4.0-1~deb14) forky; urgency=medium
+
+  * Rebuild for forky
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 27 Aug 2025 14:23:59 -0300
+
 oxen-encoding (1.4.0-1) sid; urgency=medium
 
   * fix failing install of deleted headers

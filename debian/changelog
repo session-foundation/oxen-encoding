@@ -1,3 +1,15 @@
+oxen-encoding (1.5.0-1~ubuntu2204) jammy; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Fix apple_to_chars10 gcc compatibility
+  * Support loading fixed-width spans
+  * Add "append_concat" for adding multiple string pieces
+
+  [ Sergey Fedorov ]
+  * CMakeLists: respect CMAKE_OSX_DEPLOYMENT_TARGET
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Oct 2025 18:40:21 -0300
+
 oxen-encoding (1.4.0-1~ubuntu2204) jammy; urgency=medium
 
   * fix failing install of deleted headers

@@ -9,6 +9,7 @@
 #include <limits>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -612,7 +613,15 @@ IntType get_int(const bt_value& v) {
 namespace detail {
     template <tuple_like Tuple, size_t... Is>
     void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>);
-}
+
+    template <typename Span, typename T>
+    constexpr bool is_span_of = false;
+    template <typename T, size_t Extent>
+    inline constexpr bool is_span_of<std::span<T, Extent>, T> = true;
+
+    template <typename S, typename T>
+    concept span_of = is_span_of<S, T>;
+}  // namespace detail
 
 /// Converts a bt_list into the given template std::tuple, std::pair, or std::array.  Throws a
 /// std::invalid_argument if the list has the wrong size or wrong element types.  Supports recursion
@@ -668,10 +677,8 @@ namespace detail {
             return c.template consume_integer<T>();
         else if constexpr (std::same_as<T, std::string> || std::same_as<T, std::string_view>)
             return T{c.consume_string_view()};
-        else if constexpr (
-                std::same_as<T, std::span<const std::byte>> ||
-                std::same_as<T, std::span<const unsigned char>>)
-            return T{c.template consume_span<typename T::value_type>()};
+        else if constexpr (span_of<T, const std::byte> || span_of<T, const unsigned char>)
+            return T{c.template consume_span<typename T::value_type, T::extent>()};
         else if constexpr (std::same_as<T, bt_list> || tuple_like<T> || bt_output_list_container<T>)
             return c.template consume_list<T>();
         else if constexpr (std::same_as<T, bt_dict> || bt_output_dict_container<T>)
@@ -753,7 +760,7 @@ class bt_list_consumer {
     std::string_view consume_string_view() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
-        else if (!is_string())
+        if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
         std::string_view next{data}, result;
         detail::bt_deserialize<std::string_view>{}(next, result);
@@ -761,17 +768,25 @@ class bt_list_consumer {
         return result;
     }
 
-    template <basic_char Char>
-    std::span<const Char> consume_span() {
+    /// Parses the next value as a string, returning a span.  Throws if the next value is not a
+    /// string.  This can also take a span extent: if not std::dynamic_extent then an exception is
+    /// thrown if the string length doesn't match.
+    template <basic_char Char, size_t Extent = std::dynamic_extent>
+    std::span<const Char, Extent> consume_span() {
         if (data.empty())
             throw bt_deserialize_invalid{"expected a string, but reached end of data"};
-        else if (!is_string())
+        if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
         std::string_view next{data};
         std::span<const Char> result;
         detail::bt_deserialize<std::span<const Char>>{}(next, result);
+        if constexpr (Extent != std::dynamic_extent)
+            if (result.size() != Extent)
+                throw bt_deserialize_invalid{
+                        "Fixed-width string deserialization failed: expected " +
+                        std::to_string(Extent) + " bytes, got " + std::to_string(result.size())};
         data = next;
-        return result;
+        return std::span<const Char, Extent>{result.data(), result.size()};
     }
 
     /// Attempts to parse the next value as an integer (and advance just past it).  Throws if the
@@ -1038,14 +1053,12 @@ class bt_dict_consumer : private bt_list_consumer {
 
     /// Attempt to parse the next value as a string->span pair (and advance just past it).
     /// Throws if the next value is not a string.
-    template <typename Char>
-    std::pair<std::string_view, std::span<const Char>> next_span() {
+    template <typename Char, size_t Extent = std::dynamic_extent>
+    std::pair<std::string_view, std::span<const Char, Extent>> next_span() {
         if (!is_string())
             throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-        std::pair<std::string_view, std::span<const Char>> ret;
-        ret.second = bt_list_consumer::consume_span<Char>();
-        ret.first = flush_key();
-        return ret;
+        auto val = bt_list_consumer::consume_span<Char, Extent>();
+        return {flush_key(), val};
     }
 
     /// Attempts to parse the next value as an string->integer pair (and advance just past it).
@@ -1249,9 +1262,9 @@ class bt_dict_consumer : private bt_list_consumer {
     ///         value = d.consume_string();
     ///
 
-    template <basic_char Char>
+    template <basic_char Char, size_t Extent = std::dynamic_extent>
     auto consume_span() {
-        return next_span<Char>().second;
+        return next_span<Char, Extent>().second;
     }
 
     std::string_view consume_string_view() { return next_string().second; }
@@ -1337,6 +1350,12 @@ class bt_dict_consumer : private bt_list_consumer {
     T require(std::string_view key) {
         required(key);
         return consume<T>();
+    }
+
+    template <basic_char Char, size_t Extent = std::dynamic_extent>
+    std::span<const Char, Extent> require_span(std::string_view key) {
+        required(key);
+        return consume<std::span<const Char, Extent>>();
     }
 
     /// Advances to and requires the given key (as if by calling `required()`) and then throws

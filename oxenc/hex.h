@@ -299,21 +299,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_hex_literal Hex>
+        requires(Hex.valid)
     constexpr std::string_view operator""_hex() {
-        static_assert(Hex.valid, "invalid hex literal");
         return {Hex.decoded, Hex.size};
     }
 
     template <detail::b_hex_literal Hex>
-    constexpr std::span<const std::byte> operator""_hex_b() {
-        static_assert(Hex.valid, "invalid hex literal");
-        return {Hex.decoded, Hex.size};
+        requires(Hex.valid)
+    constexpr std::span<const std::byte, Hex.size> operator""_hex_b() {
+        return std::span<const std::byte, Hex.size>(Hex.decoded, Hex.size);
     }
 
     template <detail::u_hex_literal Hex>
-    constexpr std::span<const unsigned char> operator""_hex_u() {
-        static_assert(Hex.valid, "invalid hex literal");
-        return {Hex.decoded, Hex.size};
+        requires(Hex.valid)
+    constexpr std::span<const unsigned char, Hex.size> operator""_hex_u() {
+        return std::span<const unsigned char, Hex.size>(Hex.decoded, Hex.size);
     }
 }  // namespace literals
 

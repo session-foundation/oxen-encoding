@@ -214,22 +214,12 @@ void write_host_as_little(T val, void* to) {
     std::memcpy(to, &val, sizeof(T));
 }
 
-template <endian_swappable_integer T>
-constexpr void write_host_as_little(T val, T* to) {
-    to = host_to_little(val);
-}
-
 /// Writes a big-endian integer value into the given memory location, copying and converting it
 /// (if necessary) from the given host-order integer value.
 template <endian_swappable_integer T>
 void write_host_as_big(T val, void* to) {
     host_to_big_inplace(val);
     std::memcpy(to, &val, sizeof(T));
-}
-
-template <endian_swappable_integer T>
-constexpr void write_host_as_big(T val, T* to) {
-    to = host_to_big(val);
 }
 
 /// Writes a host-order integer value into the given memory location, copying and converting it
@@ -240,22 +230,12 @@ void write_little_as_host(T val, void* to) {
     std::memcpy(to, &val, sizeof(T));
 }
 
-template <endian_swappable_integer T>
-constexpr void little_to_host_inplace(T val, T* to) {
-    to = little_to_host(val);
-}
-
 /// Writes a host-order integer value into the given memory location, copying and converting it
 /// (if necessary) from the given big-endian integer value.
 template <endian_swappable_integer T>
 void write_big_as_host(T val, void* to) {
     big_to_host_inplace(val);
     std::memcpy(to, &val, sizeof(T));
-}
-
-template <endian_swappable_integer T>
-constexpr void write_big_as_host(T val, T* to) {
-    to = big_to_host(val);
 }
 
 }  // namespace oxenc

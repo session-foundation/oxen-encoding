@@ -349,21 +349,21 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b32z_literal Base32z>
+        requires(Base32z.valid)
     constexpr std::string_view operator""_b32z() {
-        static_assert(Base32z.valid, "invalid base32z literal");
         return {Base32z.decoded, Base32z.size};
     }
 
     template <detail::b_b32z_literal Base32z>
-    constexpr std::span<const std::byte> operator""_b32z_b() {
-        static_assert(Base32z.valid, "invalid base32z literal");
-        return {Base32z.decoded, Base32z.size};
+        requires(Base32z.valid)
+    constexpr std::span<const std::byte, Base32z.size> operator""_b32z_b() {
+        return std::span<const std::byte, Base32z.size>(Base32z.decoded, Base32z.size);
     }
 
     template <detail::u_b32z_literal Base32z>
-    constexpr std::span<const unsigned char> operator""_b32z_u() {
-        static_assert(Base32z.valid, "invalid base32z literal");
-        return {Base32z.decoded, Base32z.size};
+        requires(Base32z.valid)
+    constexpr std::span<const unsigned char, Base32z.size> operator""_b32z_u() {
+        return std::span<const unsigned char, Base32z.size>(Base32z.decoded, Base32z.size);
     }
 }  // namespace literals
 

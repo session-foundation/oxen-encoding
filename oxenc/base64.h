@@ -431,21 +431,23 @@ namespace detail {
 
 inline namespace literals {
     template <detail::c_b64_literal Base64>
+        requires(Base64.valid != 0)
     constexpr std::string_view operator""_b64() {
-        static_assert(Base64.valid, "Invalid base64 literal");
         return {Base64.decoded, Base64.size - Base64.valid};
     }
 
     template <detail::b_b64_literal Base64>
-    constexpr std::span<const std::byte> operator""_b64_b() {
-        static_assert(Base64.valid, "Invalid base64 literal");
-        return {Base64.decoded, Base64.size - Base64.valid};
+        requires(Base64.valid != 0)
+    constexpr std::span<const std::byte, Base64.size - Base64.valid> operator""_b64_b() {
+        return std::span<const std::byte, Base64.size - Base64.valid>(
+                Base64.decoded, Base64.size - Base64.valid);
     }
 
     template <detail::u_b64_literal Base64>
-    constexpr std::span<const unsigned char> operator""_b64_u() {
-        static_assert(Base64.valid, "Invalid base64 literal");
-        return {Base64.decoded, Base64.size - Base64.valid};
+        requires(Base64.valid != 0)
+    constexpr std::span<const unsigned char, Base64.size - Base64.valid> operator""_b64_u() {
+        return std::span<const unsigned char, Base64.size - Base64.valid>(
+                Base64.decoded, Base64.size - Base64.valid);
     }
 }  // namespace literals
 

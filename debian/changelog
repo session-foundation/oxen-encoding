@@ -1,3 +1,10 @@
+oxen-encoding (1.6.0-1~deb14) forky; urgency=medium
+
+  * Remove broken overloads
+  * hex/b32z/b64 literals: fixed-extent, better diagnostics
+
+ -- Jason Rhinelander <jason@session.foundation>  Tue, 24 Mar 2026 20:24:15 -0300
+
 oxen-encoding (1.5.0-1~deb14) forky; urgency=medium
 
   [ Jason Rhinelander ]

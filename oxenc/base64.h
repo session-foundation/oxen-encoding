@@ -97,7 +97,7 @@ struct base64_encoder final {
     using reference = value_type;
     using pointer = void;
     constexpr base64_encoder(InputIt begin, InputIt end, bool padded = true) :
-            _it{std::move(begin)}, _end{std::move(end)}, padding{padded} {}
+            _it{std::move(begin)}, _end{std::move(end)}, padding{padded && _it != _end} {}
 
     constexpr base64_encoder end() { return {_end, _end, false}; }
 

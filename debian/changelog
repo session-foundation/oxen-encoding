@@ -1,3 +1,10 @@
+oxen-encoding (1.6.1-1~ubuntu2604) resolute; urgency=medium
+
+  * Fix base64 empty encoding adding padding
+  * Use builds.session.codes for build uploads
+
+ -- Jason Rhinelander <jason@session.foundation>  Fri, 25 Sep 2026 19:33:53 -0300
+
 oxen-encoding (1.6.0-1~ubuntu2604) resolute; urgency=medium
 
   * Resolute deb

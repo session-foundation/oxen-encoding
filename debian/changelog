@@ -1,3 +1,10 @@
+oxen-encoding (1.6.1-1) unstable; urgency=medium
+
+  * fix upload domain name
+  * Fix base64 empty encoding adding padding
+
+ -- Jason Rhinelander <jason@session.foundation>  Fri, 25 Sep 2026 19:33:46 -0300
+
 oxen-encoding (1.6.0-1) sid; urgency=medium
 
   * Remove broken overloads

@@ -17,6 +17,12 @@ constexpr auto pk_b32z_constexpr = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax
 constexpr auto pk_b64_constexpr = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g="_b64;
 
 TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
+    // Empty input:
+    REQUIRE(oxenc::to_hex("") == "");
+    REQUIRE(oxenc::to_hex(""s) == "");
+    REQUIRE(oxenc::from_hex("") == "");
+    REQUIRE(oxenc::is_hex(""));
+
     REQUIRE(oxenc::to_hex("\xff\x42\x12\x34") == "ff421234"s);
     std::vector<uint8_t> chars{{1, 10, 100, 254}};
     std::array<uint8_t, 8> out;
@@ -93,6 +99,12 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 }
 
 TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
+    // Empty input:
+    REQUIRE(oxenc::to_base32z("") == "");
+    REQUIRE(oxenc::to_base32z(""s) == "");
+    REQUIRE(oxenc::from_base32z("") == "");
+    REQUIRE(oxenc::is_base32z(""));
+
     REQUIRE(oxenc::to_base32z("\0\0\0\0\0"s) == "yyyyyyyy");
     REQUIRE(oxenc::to_base32z(
                     "\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef\x01\x23\x45\x67\x89\xab\xcd\xef"sv) ==
@@ -213,6 +225,16 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
 }
 
 TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
+    // Empty input:
+    REQUIRE(oxenc::to_base64("") == "");
+    REQUIRE(oxenc::to_base64(""s) == "");
+    REQUIRE(oxenc::to_base64_unpadded("") == "");
+    REQUIRE(oxenc::from_base64("") == "");
+    REQUIRE(oxenc::is_base64(""));
+    REQUIRE(oxenc::to_base64_size(0) == 0);
+    REQUIRE(oxenc::to_base64_size(0, false) == 0);
+    REQUIRE(oxenc::from_base64_size(0) == 0);
+
     // 00000000 00000000 00000000 -> 000000 000000 000000 000000
     REQUIRE(oxenc::to_base64("\0\0\0"s) == "AAAA");
     // 00000001 00000002 00000003 -> 000000 010000 000200 000003
